@@ -7,7 +7,7 @@ import "./empty.css";
 import "./account-manager.css";
 
 type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string };
-type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number };
+type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number };
 type CoinHolding = Holding;
 type PensionHolding = Holding;
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
@@ -29,7 +29,7 @@ function AccountDetails({ account, holdings, coinHoldings, pensionHoldings, quot
   const isDomestic = account.type === "국내 주식";
   const isCoin = account.type === "코인";
   const isPension = account.type === "연금저축";
-  const positions = isDomestic ? holdings : isCoin ? coinHoldings : isPension ? pensionHoldings : [];
+  const positions = isDomestic ? holdings.filter(holding => holding.accountId === account.id) : isCoin ? coinHoldings.filter(holding => holding.accountId === account.id) : isPension ? pensionHoldings.filter(holding => holding.accountId === account.id) : [];
   const updatedAt = isDomestic ? quoteUpdatedAt : coinQuoteUpdatedAt;
   const refresh = isDomestic ? refreshPrices : refreshCoinPrices;
 
@@ -55,9 +55,13 @@ export default function Home() {
       if (!data.quotes) throw new Error("No quotes");
       setHoldings(current => {
         const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice }));
-        const value = next.reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0);
-        const cost = next.reduce((sum, holding) => sum + holding.quantity * holding.averagePrice, 0);
-        setAccounts(accountState => accountState.map(account => account.type === "국내 주식" ? { ...account, amount: value, returnRate: cost > 0 ? (value / cost - 1) * 100 : 0 } : account));
+        setAccounts(accountState => accountState.map(account => {
+          if (account.type !== "국내 주식") return account;
+          const positions = next.filter(holding => holding.accountId === account.id);
+          const value = positions.reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0);
+          const cost = positions.reduce((sum, holding) => sum + holding.quantity * holding.averagePrice, 0);
+          return positions.length > 0 ? { ...account, amount: value, returnRate: cost > 0 ? (value / cost - 1) * 100 : 0 } : account;
+        }));
         return next;
       });
       setQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
@@ -92,9 +96,9 @@ export default function Home() {
         if (data.hasData && data.state) {
           if (Array.isArray(data.state.accounts)) setAccounts(data.state.accounts);
           if (Array.isArray(data.state.imports)) setImports(data.state.imports);
-          if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings);
-          if (Array.isArray(data.state.coinHoldings)) setCoinHoldings(data.state.coinHoldings);
-          if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings);
+          if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(holding => ({ ...holding, accountId: holding.accountId ?? 2 })));
+          if (Array.isArray(data.state.coinHoldings)) setCoinHoldings(data.state.coinHoldings.map(holding => ({ ...holding, accountId: holding.accountId ?? 7 })));
+          if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings.map(holding => ({ ...holding, accountId: holding.accountId ?? 5 })));
         } else {
           // 기존 브라우저 데이터는 최초 한 번만 DB로 옮겨, 이전 입력을 잃지 않게 합니다.
           const legacy = localStorage.getItem(STORAGE_KEY);
@@ -137,7 +141,7 @@ export default function Home() {
   const resetAccount = (account: Account) => {
     if (!window.confirm(`“${account.name}”의 가져온 자산 데이터를 초기화할까요? 계좌 유형은 유지됩니다.`)) return;
     setAccounts(current => current.map(item => item.id === account.id ? { ...item, name: `${item.type} 계좌`, broker: "미연결", amount: 0, returnRate: 0 } : item));
-    if (account.id === 2) setHoldings([]); if (account.type === "코인") setCoinHoldings([]); if (account.type === "연금저축") setPensionHoldings([]); setImports(current => current.filter(item => item.accountId !== account.id));
+    if (account.type === "국내 주식") setHoldings(current => current.filter(holding => holding.accountId !== account.id)); if (account.type === "코인") setCoinHoldings(current => current.filter(holding => holding.accountId !== account.id)); if (account.type === "연금저축") setPensionHoldings(current => current.filter(holding => holding.accountId !== account.id)); setImports(current => current.filter(item => item.accountId !== account.id));
     setNotice(`${account.type} 계좌 데이터를 초기화했습니다.`);
   };
   const addAccount = () => {
@@ -149,7 +153,7 @@ export default function Home() {
   const deleteAccount = (account: Account) => {
     if (!window.confirm(`“${account.name}” 계좌를 삭제할까요? 가져온 데이터도 함께 삭제됩니다.`)) return;
     setAccounts(current => current.filter(item => item.id !== account.id)); setImports(current => current.filter(item => item.accountId !== account.id));
-    if (account.type === "국내 주식") setHoldings([]); if (account.type === "코인") setCoinHoldings([]); if (account.type === "연금저축") setPensionHoldings([]);
+    if (account.type === "국내 주식") setHoldings(current => current.filter(holding => holding.accountId !== account.id)); if (account.type === "코인") setCoinHoldings(current => current.filter(holding => holding.accountId !== account.id)); if (account.type === "연금저축") setPensionHoldings(current => current.filter(holding => holding.accountId !== account.id));
     setNotice(`${account.name} 계좌를 삭제했습니다.`);
   };
   return <main>
