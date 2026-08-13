@@ -1,0 +1,1 @@
+.reset-button{justify-self:end;border:1px solid #ebd7da;border-radius:7px;padding:6px 8px;color:#ad5d66;background:#fff8f8;font-size:11px}.reset-button:hover{background:#fff0f1}@media(max-width:900px){.reset-button{grid-column:4}.account-row .reset-button{display:block}}@media(max-width:520px){.reset-button{grid-column:3}}
