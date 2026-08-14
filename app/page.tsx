@@ -79,7 +79,7 @@ const importedIrpHoldings: Holding[] = [
   ["KODEX TRF3070", "IRP-TRF3070", 1068, 12466650, 15197640, "ETF·주식"], ["ACE 미국S&P500", "360200.KS", 189, 2346435, 5235360, "ETF·주식"],
   ["TIGER 차이나전기차SOLACTIVE", "371460.KS", 163, 2773925, 1782405, "ETF·주식"], ["미래에셋증권현금성자산", "IRP-CASH", 1, 1385975, 1385975, "현금성·금융상품"],
   ["애큐온저축은행예금 IRP(개인) 1Y_퇴직", "IRP-ACCION", 1, 394370, 401192, "현금성·금융상품"], ["(통합)(무)흥국생명보험 퇴직연금 이율보증형 3년 (IRP)", "IRP-HEUNGKUK", 1, 433563, 456789, "현금성·금융상품"],
-  ["(통합)KB손해보험 원리금보장형 이율보증형 3년 (DC/IRP)", "IRP-KB", 1, 1700932, 1740738, "현금성·금융상품"], ["미래에셋증권 디폴트옵션 안정투자형 3년 (DC/IRP)", "IRP-DEFAULT-3Y", 1, 1700932, 1740738, "현금성·금융상품"],
+  ["(통합)KB손해보험 원리금보장형 이율보증형 3년 (DC/IRP)", "IRP-KB", 1, 1700932, 1740738, "현금성·금융상품"],
   ["미래에셋증권 디폴트옵션 안정투자형 포트폴리오 1", "IRP-DEFAULT-P1", 1, 16966169, 17893310, "현금성·금융상품"],
 ].map(([name, symbol, quantity, cost, value, assetClass]) => ({ name: String(name), symbol: String(symbol), quantity: Number(quantity), averagePrice: Number(cost) / Number(quantity), fallbackPrice: Number(value) / Number(quantity), accountId: 4, assetClass: assetClass as Holding["assetClass"] }));
 
@@ -302,12 +302,12 @@ export default function Home() {
     return () => { mounted = false; };
   }, []);
   useEffect(() => {
-    if (!hydrated || irpResetVersion >= 2) return;
+    if (!hydrated || irpResetVersion >= 3) return;
     const value = importedIrpHoldings.reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0);
     const cost = importedIrpHoldings.reduce((sum, holding) => sum + holding.quantity * holding.averagePrice, 0);
     setIrpHoldings(importedIrpHoldings);
     setAccounts(current => current.map(account => account.id === 4 ? { ...account, amount: value, returnRate: cost > 0 ? (value / cost - 1) * 100 : 0 } : account));
-    setIrpResetVersion(2);
+    setIrpResetVersion(3);
   }, [hydrated, irpResetVersion]);
   useEffect(() => {
     if (!hydrated || total <= 0) return;
