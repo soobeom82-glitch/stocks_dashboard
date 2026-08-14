@@ -6,10 +6,12 @@ import "./reset.css";
 import "./empty.css";
 import "./account-manager.css";
 import "./accounts.css";
+import "./trend.css";
 
 type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string };
 type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
+type Snapshot = { date: string; total: number };
 
 const initialAccounts: Account[] = [
   { id: 1, type: "미국 주식", broker: "미연결", name: "미국 주식 계좌", amount: 0, returnRate: 0, color: "blue" },
@@ -33,6 +35,15 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   8: { name: "국내 주식 계좌 2", broker: "대신증권" },
 };
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => accountProfile[account.id] ? { ...account, ...accountProfile[account.id] } : account);
+const todayKst = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
+
+function TrendChart({ snapshots }: { snapshots: Snapshot[] }) {
+  if (snapshots.length < 2) return <div className="chart empty-chart">오늘 평가금액을 기준선으로 저장했습니다. 내일부터 일별 자산 추이가 표시됩니다.</div>;
+  const values = snapshots.map(snapshot => snapshot.total);
+  const min = Math.min(...values); const max = Math.max(...values); const range = max - min || 1;
+  const points = values.map((value, index) => `${index / (values.length - 1) * 100},${88 - (value - min) / range * 72}`).join(" ");
+  return <div className="trend-chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="통합 자산 추이"><polyline points={points} fill="none" stroke="#5666df" strokeWidth="2.5" vectorEffect="non-scaling-stroke" /><polyline points={`0,100 ${points} 100,100`} fill="#5666df12" stroke="none" /></svg><div className="trend-labels"><span>{snapshots[0].date.slice(5).replace("-", ".")}</span><span>{snapshots.at(-1)?.date.slice(5).replace("-", ".")}</span></div></div>;
+}
 // 사용자가 제공한 미국 주식 잔고 화면의 수량·달러 평단가입니다. 현재가는 조회 시 갱신됩니다.
 const importedUsdHoldings: Holding[] = [
   ["AAPL", "애플", 1, 145.9766, 304.56], ["GDX", "금광 반에크 ETF", 5, 30.57, 87.79], ["HLT", "힐튼 월드와이드 홀딩스", 5, 180.5, 320.82],
@@ -91,11 +102,13 @@ export default function Home() {
   const [irpQuoteUpdatedAt, setIrpQuoteUpdatedAt] = useState("");
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
   const [imports, setImports] = useState<ScreenshotImport[]>([]);
+  const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const syncErrorShown = useRef(false);
   const total = useMemo(() => accounts.reduce((sum, account) => sum + account.amount, 0), [accounts]);
   const weightedReturn = useMemo(() => total > 0 ? accounts.reduce((sum, account) => sum + account.amount * account.returnRate, 0) / total : 0, [accounts, total]);
   const accountsByValue = useMemo(() => [...accounts].sort((a, b) => b.amount - a.amount), [accounts]);
+  const dailyChange = useMemo(() => snapshots.length > 1 ? (snapshots.at(-1)!.total / snapshots.at(-2)!.total - 1) * 100 : null, [snapshots]);
 
   const updateStockAccounts = (type: string, next: Holding[], exchangeRate = 1) => setAccounts(current => current.map(account => {
     if (account.type !== type) return account;
@@ -150,11 +163,12 @@ export default function Home() {
     let mounted = true;
     void fetch("/api/portfolio").then(async response => {
       if (!response.ok) throw new Error("저장소 조회 실패");
-      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; holdings?: Holding[]; usdHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
+      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; holdings?: Holding[]; usdHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
     }).then(data => {
       if (!mounted || !data.hasData || !data.state) return;
           if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
       if (Array.isArray(data.state.imports)) setImports(data.state.imports);
+      if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number").slice(-366));
       if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => ({ ...item, accountId: item.accountId ?? 2 })));
       if (Array.isArray(data.state.usdHoldings)) setUsdHoldings(data.state.usdHoldings.map(item => ({ ...item, accountId: item.accountId ?? 1 })));
       else setUsdHoldings(importedUsdHoldings);
@@ -166,10 +180,19 @@ export default function Home() {
     return () => { mounted = false; };
   }, []);
   useEffect(() => {
+    if (!hydrated || total <= 0) return;
+    const date = todayKst();
+    setSnapshots(current => {
+      const withoutToday = current.filter(snapshot => snapshot.date !== date);
+      const next = [...withoutToday, { date, total }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
+      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+    });
+  }, [hydrated, total]);
+  useEffect(() => {
     if (!hydrated) return;
-    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
+    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, snapshots, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
     return () => window.clearTimeout(timer);
-  }, [accounts, imports, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
+  }, [accounts, imports, snapshots, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
   const detailsFor = (account: Account) => {
     if (account.type === "미국 주식") return { positions: usdHoldings.filter(item => item.accountId === account.id), updatedAt: usdQuoteUpdatedAt, exchangeRate: usdKrwRate, refresh: refreshUsdPrices };
     if (account.type === "국내 주식") return { positions: holdings.filter(item => item.accountId === account.id), updatedAt: quoteUpdatedAt, exchangeRate: 1, refresh: () => refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt) };
@@ -183,7 +206,7 @@ export default function Home() {
     <section className="hero"><div><p className="eyebrow">ALL ACCOUNTS · KRW</p><h1>내 자산, 한눈에.</h1><p className="hero-copy">증권사별 계좌와 연금·펀드·코인을 한곳에 모아 성과를 확인하세요.</p></div></section>
     {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>닫기</button></div>}
     <section className="metrics"><article className="metric-card main-metric"><p>통합 평가자산</p><strong>{won.format(total)}</strong><span>등록된 보유 종목 기준</span></article><article className="metric-card"><p>통합 수익률</p><strong>{total > 0 ? percent(weightedReturn) : "-"}</strong><span>매입금액 대비</span></article><article className="metric-card"><p>운용 계좌</p><strong>{accounts.filter(account => account.amount > 0).length}<small>개</small></strong><span>등록 가능한 7개 자산 유형</span></article><article className="metric-card"><p>이번 달 수익</p><strong>{total > 0 ? won.format(0) : "-"}</strong><span>거래 내역 등록 후 제공</span></article></section>
-    <section className="content-grid"><article className="panel performance-panel"><div className="panel-head"><div><p className="eyebrow">PERFORMANCE</p><h2>통합 수익 리포트</h2></div><button className="text-button">리포트 상세 보기 →</button></div><div className="periods" role="tablist">{reports.map((item, index) => <button key={item} role="tab" aria-selected={period === index} className={period === index ? "selected" : ""} onClick={() => setPeriod(index)}>{item}</button>)}</div><div className="report-value"><div><span>{reports[period]}간 수익률</span><strong>{total > 0 ? "계산 준비 중" : "데이터 없음"}</strong></div><span className="report-description">거래·평가 이력이 쌓이면 산출됩니다</span></div><div className="chart empty-chart">자산 이력이 쌓이면 기간별 추이가 표시됩니다.</div></article><article className="panel allocation"><div className="panel-head"><div><p className="eyebrow">ALLOCATION</p><h2>계좌별 비중</h2></div><button className="dots">•••</button></div><div className="donut"><div><strong>{accounts.filter(account => account.amount > 0).length}</strong><span>연결 계좌</span></div></div><div className="legend">{accounts.map(account => <div key={account.id}><i className={account.color}/><span>{account.type}</span><b>{total > 0 ? Math.round(account.amount / total * 100) : 0}%</b></div>)}</div></article></section>
+    <section className="content-grid"><article className="panel performance-panel"><div className="panel-head"><div><p className="eyebrow">PERFORMANCE</p><h2>통합 자산 추이</h2></div></div><div className="periods" role="tablist">{reports.map((item, index) => <button key={item} role="tab" aria-selected={period === index} className={period === index ? "selected" : ""} onClick={() => setPeriod(index)}>{item}</button>)}</div><div className="report-value"><div><span>{reports[period]}간 수익률</span><strong>{dailyChange === null ? "비교 기준 생성 중" : percent(dailyChange)}</strong></div><span className="report-description">매일 첫 조회 시점의 통합 평가자산을 저장합니다</span></div><TrendChart snapshots={snapshots} /></article><article className="panel allocation"><div className="panel-head"><div><p className="eyebrow">ALLOCATION</p><h2>계좌별 비중</h2></div><button className="dots">•••</button></div><div className="donut"><div><strong>{accounts.filter(account => account.amount > 0).length}</strong><span>연결 계좌</span></div></div><div className="legend">{accounts.map(account => <div key={account.id}><i className={account.color}/><span>{account.type}</span><b>{total > 0 ? Math.round(account.amount / total * 100) : 0}%</b></div>)}</div></article></section>
     <section className="accounts-section"><div className="panel-head"><div><p className="eyebrow">ACCOUNTS</p><h2>계좌별 자산</h2></div></div><p className="account-hint">평가금액이 큰 계좌부터 표시됩니다. 계좌를 클릭하면 보유자산 상세와 현재가를 확인할 수 있습니다.</p><div className="account-table"><div className="table-heading"><span>계좌</span><span>평가금액</span><span>수익률</span><span>비중</span><span/></div>{accountsByValue.map(account => { const details = detailsFor(account); return <div className="account-item" key={account.id}><div className={`account-row ${expandedAccountId === account.id ? "expanded" : ""}`} role="button" tabIndex={0} onClick={() => setExpandedAccountId(current => current === account.id ? null : account.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedAccountId(current => current === account.id ? null : account.id); } }}><div><span className={`account-icon ${account.color}`}>{account.type.slice(0, 1)}</span><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span></div><strong>{won.format(account.amount)}</strong><strong className={account.returnRate >= 0 ? "positive" : "negative"}>{percent(account.returnRate)}</strong><div className="weight"><i><em style={{ width: `${total > 0 ? account.amount / total * 100 : 0}%` }}/></i><span>{total > 0 ? (account.amount / total * 100).toFixed(1) : "0.0"}%</span></div><span className="row-actions"><i className="expand-arrow" aria-hidden="true">{expandedAccountId === account.id ? "⌃" : "⌄"}</i></span></div>{expandedAccountId === account.id && <AccountDetails account={account} {...details} />}</div>; })}</div></section>
   </main>;
 }
