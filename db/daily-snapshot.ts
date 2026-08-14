@@ -1,6 +1,6 @@
 type Holding = { symbol: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number };
 type Account = { id: number; type: string; amount: number; returnRate: number };
-type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number }> };
+type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number }> };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 

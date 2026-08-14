@@ -32,6 +32,7 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   3: { name: "ISA 중개형 계좌", broker: "한화투자증권" },
   4: { name: "IRP 계좌", broker: "미래에셋증권" },
   5: { name: "연금저축 계좌", broker: "삼성증권" },
+  6: { name: "펀드 계좌", broker: "한화자산운용 PINE" },
   8: { name: "국내 주식 계좌 2", broker: "대신증권" },
 };
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => accountProfile[account.id] ? { ...account, ...accountProfile[account.id] } : account);
@@ -51,26 +52,29 @@ const importedUsdHoldings: Holding[] = [
   ["NVDA", "엔비디아", 1, 109.46, 225.02], ["SPYG", "S&P 500 성장주 SPDR ETF", 1, 49.92, 123.4], ["T", "에이티앤티", 100, 16.58, 24.61],
   ["TSLA", "테슬라", 20, 274.6701, 340], ["VT", "글로벌 주식 뱅가드 ETF", 30, 102.53, 162.28],
 ].map(([symbol, name, quantity, averagePrice, fallbackPrice]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(fallbackPrice), accountId: 1 }));
+const importedFundHoldings: Holding[] = [{ symbol: "LIFEPLUS-TDF2040-J-PE", name: "한화 LIFEPLUS 적격 TDF2040 연금 J-Pe", quantity: 1, averagePrice: 3010000, fallbackPrice: 4527457, accountId: 6, unit: "건" }];
 
 function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh }: { account: Account; positions: Holding[]; updatedAt: string; exchangeRate: number; refresh: () => Promise<void> }) {
   const isUsd = account.type === "미국 주식";
   const isCoin = account.type === "코인";
+  const isFund = account.type === "펀드";
   const isIrp = account.type === "IRP";
   const isKrwStock = ["국내 주식", "ISA", "연금저축"].includes(account.type);
   const groups = isIrp
     ? ["ETF·주식", "현금성·금융상품"].map(assetClass => ({ assetClass, positions: positions.filter(holding => holding.assetClass === assetClass) })).filter(group => group.positions.length)
     : [{ assetClass: "보유자산", positions }];
-  const title = isUsd ? "미국 주식 · 원화 환산 기준" : isCoin ? "코인 · 업비트 현재가 기준" : account.type === "국내 주식" ? "국내 주식 · 현재가 기준" : account.type === "ISA" ? "ISA · 현재가 기준" : account.type === "연금저축" ? "연금저축 · 현재가 기준" : "IRP · 투자상품 및 현금성 자산";
-  const label = isUsd ? "US HOLDINGS · KRW" : isCoin ? "CRYPTO HOLDINGS" : account.type === "국내 주식" ? "DOMESTIC HOLDINGS" : account.type === "ISA" ? "ISA HOLDINGS" : account.type === "연금저축" ? "PENSION HOLDINGS" : "IRP HOLDINGS";
+  const title = isUsd ? "미국 주식 · 원화 환산 기준" : isCoin ? "코인 · 업비트 현재가 기준" : isFund ? "펀드 · 등록 평가금액 기준" : account.type === "국내 주식" ? "국내 주식 · 현재가 기준" : account.type === "ISA" ? "ISA · 현재가 기준" : account.type === "연금저축" ? "연금저축 · 현재가 기준" : "IRP · 투자상품 및 현금성 자산";
+  const label = isUsd ? "US HOLDINGS · KRW" : isCoin ? "CRYPTO HOLDINGS" : isFund ? "FUND HOLDINGS" : account.type === "국내 주식" ? "DOMESTIC HOLDINGS" : account.type === "ISA" ? "ISA HOLDINGS" : account.type === "연금저축" ? "PENSION HOLDINGS" : "IRP HOLDINGS";
   const note = isUsd
     ? `미국 현지 현재가와 USD/KRW 환율(1 USD = ${won.format(exchangeRate)})을 반영해 원화 평가금액·손익을 계산합니다.`
+    : isFund ? "한화자산운용 PINE에서 확인한 평가금액을 기준으로 표시합니다. 펀드 기준가 연동은 추후 추가할 수 있습니다."
     : isKrwStock ? "등록된 보유 수량과 평단가를 기준으로 현재가 손익과 수익률을 계산합니다."
     : isCoin ? "업비트 KRW 마켓 현재가를 6시간마다 갱신하며, 버튼으로 즉시 다시 조회할 수 있습니다."
     : "상장 ETF·주식은 현재가를 표시하고, 예금·보험·디폴트옵션은 마지막 등록 평가금액을 유지합니다.";
 
-  if (!isUsd && !isCoin && !isKrwStock && !isIrp) return <div className="account-expanded empty-account-detail">등록된 보유자산이 없습니다.</div>;
+  if (!isUsd && !isCoin && !isFund && !isKrwStock && !isIrp) return <div className="account-expanded empty-account-detail">등록된 보유자산이 없습니다.</div>;
   return <div className="account-expanded">
-    <div className="detail-head"><div><p className="eyebrow">{label}</p><h3>{title}</h3></div><button className="text-button" onClick={event => { event.stopPropagation(); void refresh(); }}>현재가 새로고침 {updatedAt && `· ${updatedAt}`}</button></div>
+    <div className="detail-head"><div><p className="eyebrow">{label}</p><h3>{title}</h3></div>{!isFund && <button className="text-button" onClick={event => { event.stopPropagation(); void refresh(); }}>현재가 새로고침 {updatedAt && `· ${updatedAt}`}</button>}</div>
     <p className="holdings-note">{note}</p>
     {positions.length === 0 ? <div className="empty-holdings">등록된 {isCoin ? "코인 보유자산" : "보유 종목"}이 없습니다.</div> : groups.map(group => <div className="holding-group" key={group.assetClass}>{isIrp && <h4>{group.assetClass}</h4>}<div className="holding-table"><div><span>{isCoin ? "코인" : isIrp ? "상품" : "종목"}</span><span>보유 수량</span><span>매입금액</span><span>평가금액</span><span>평가손익</span><span>수익률</span></div>{group.positions.map(holding => {
       const multiplier = isUsd ? exchangeRate : 1;
@@ -89,6 +93,7 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [usdHoldings, setUsdHoldings] = useState<Holding[]>([]);
+  const [fundHoldings, setFundHoldings] = useState<Holding[]>([]);
   const [coinHoldings, setCoinHoldings] = useState<Holding[]>([]);
   const [pensionHoldings, setPensionHoldings] = useState<Holding[]>([]);
   const [isaHoldings, setIsaHoldings] = useState<Holding[]>([]);
@@ -148,6 +153,12 @@ export default function Home() {
       setCoinQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("코인 현재가를 불러오지 못했습니다. 마지막 확인 가격으로 계산합니다."); }
   };
+  useEffect(() => {
+    if (!fundHoldings.length) return;
+    const value = fundHoldings.reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0);
+    const cost = fundHoldings.reduce((sum, holding) => sum + holding.quantity * holding.averagePrice, 0);
+    setAccounts(current => current.map(account => account.type === "펀드" ? { ...account, amount: value, returnRate: cost > 0 ? (value / cost - 1) * 100 : 0 } : account));
+  }, [fundHoldings.length]);
   const refreshIrpPrices = async () => {
     const symbols = irpHoldings.filter(item => item.assetClass === "ETF·주식" && item.symbol.endsWith(".KS")).map(item => item.symbol);
     if (!symbols.length) { setNotice("현재가를 반영할 IRP ETF가 없습니다."); return; }
@@ -163,7 +174,7 @@ export default function Home() {
     let mounted = true;
     void fetch("/api/portfolio").then(async response => {
       if (!response.ok) throw new Error("저장소 조회 실패");
-      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; holdings?: Holding[]; usdHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
+      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
     }).then(data => {
       if (!mounted || !data.hasData || !data.state) return;
           if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
@@ -172,6 +183,8 @@ export default function Home() {
       if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => ({ ...item, accountId: item.accountId ?? 2 })));
       if (Array.isArray(data.state.usdHoldings)) setUsdHoldings(data.state.usdHoldings.map(item => ({ ...item, accountId: item.accountId ?? 1 })));
       else setUsdHoldings(importedUsdHoldings);
+      if (Array.isArray(data.state.fundHoldings)) setFundHoldings(data.state.fundHoldings.map(item => ({ ...item, accountId: item.accountId ?? 6 })));
+      else setFundHoldings(importedFundHoldings);
       if (Array.isArray(data.state.coinHoldings)) setCoinHoldings(data.state.coinHoldings.map(item => ({ ...item, accountId: item.accountId ?? 7 })));
       if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings.map(item => ({ ...item, accountId: item.accountId ?? 5 })));
       if (Array.isArray(data.state.isaHoldings)) setIsaHoldings(data.state.isaHoldings.map(item => ({ ...item, accountId: item.accountId ?? 3 })));
@@ -189,11 +202,12 @@ export default function Home() {
   }, [hydrated, total]);
   useEffect(() => {
     if (!hydrated) return;
-    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, snapshots, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
+    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, snapshots, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
     return () => window.clearTimeout(timer);
-  }, [accounts, imports, snapshots, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
+  }, [accounts, imports, snapshots, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
   const detailsFor = (account: Account) => {
     if (account.type === "미국 주식") return { positions: usdHoldings.filter(item => item.accountId === account.id), updatedAt: usdQuoteUpdatedAt, exchangeRate: usdKrwRate, refresh: refreshUsdPrices };
+    if (account.type === "펀드") return { positions: fundHoldings.filter(item => item.accountId === account.id), updatedAt: "", exchangeRate: 1, refresh: async () => undefined };
     if (account.type === "국내 주식") return { positions: holdings.filter(item => item.accountId === account.id), updatedAt: quoteUpdatedAt, exchangeRate: 1, refresh: () => refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt) };
     if (account.type === "코인") return { positions: coinHoldings.filter(item => item.accountId === account.id), updatedAt: coinQuoteUpdatedAt, exchangeRate: 1, refresh: refreshCoinPrices };
     if (account.type === "ISA") return { positions: isaHoldings.filter(item => item.accountId === account.id), updatedAt: isaQuoteUpdatedAt, exchangeRate: 1, refresh: () => refreshKrw(isaHoldings, setIsaHoldings, "ISA", setIsaQuoteUpdatedAt) };
