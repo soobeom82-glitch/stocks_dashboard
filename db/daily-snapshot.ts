@@ -1,6 +1,7 @@
-type Holding = { symbol: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number };
+type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string };
 type Account = { id: number; type: string; amount: number; returnRate: number };
-type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number }> };
+type ProfitPeak = { profit: number; date: string };
+type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number }>; profitPeaks?: Record<string, ProfitPeak> };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 
@@ -40,6 +41,29 @@ function accountPerformance(accounts: Account[], type: string, holdings: Holding
   });
 }
 
+function isDomesticHolding(accountType: string, holding: Holding) {
+  if (accountType === "코인" || accountType === "펀드" || holding.assetClass === "현금성·금융상품") return false;
+  const text = `${holding.name ?? ""} ${holding.symbol}`.toLowerCase();
+  if (/금|gold|iau|gdx|리츠|reit|원자재|commodity|국채|채권|bond|미국채/.test(text)) return false;
+  if (accountType === "미국 주식" || /미국|나스닥|s&p|nifty|차이나|글로벌|msci|해외|인도/.test(text)) return false;
+  return true;
+}
+
+function updateProfitPeaks(state: PortfolioState, accounts: Account[], groups: Array<{ type: string; holdings: Holding[] }>, date: string) {
+  const profits = new Map<string, number>();
+  groups.forEach(({ type, holdings }) => holdings.forEach(holding => {
+    const account = accounts.find(item => item.id === holding.accountId);
+    if (!isDomesticHolding(account?.type ?? type, holding)) return;
+    const key = holding.symbol || holding.name || "unknown";
+    profits.set(key, (profits.get(key) ?? 0) + holding.quantity * (holding.fallbackPrice - holding.averagePrice));
+  }));
+  const peaks = { ...(state.profitPeaks ?? {}) };
+  profits.forEach((profit, symbol) => {
+    if (!peaks[symbol] || profit > peaks[symbol].profit) peaks[symbol] = { profit, date };
+  });
+  return peaks;
+}
+
 export async function saveDailyPortfolioSnapshot(db: D1Database) {
   const saved = await db.prepare("SELECT payload FROM dashboard_state WHERE scope = ? LIMIT 1").bind("owner").first<{ payload: string }>();
   if (!saved) return;
@@ -60,6 +84,7 @@ export async function saveDailyPortfolioSnapshot(db: D1Database) {
   const total = accounts.reduce((sum, account) => sum + account.amount, 0);
   const date = KST_DATE();
   const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
-  const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, snapshots });
+  const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: state.irpHoldings ?? [] }], date);
+  const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, snapshots, profitPeaks });
   await db.prepare("UPDATE dashboard_state SET payload = ?, updated_at = ? WHERE scope = ?").bind(payload, new Date().toISOString(), "owner").run();
 }
