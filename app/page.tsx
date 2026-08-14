@@ -35,6 +35,7 @@ const assetTypeMeta: Record<AssetType, { color: string }> = {
 const colorHex: Record<string, string> = { blue: "#5666df", violet: "#8d71e8", mint: "#3fb99e", orange: "#f5a641", pink: "#e878a9", yellow: "#ecc950" };
 const assetTypeFor = (accountType: string, holding?: Holding): AssetType => {
   if (["005935.KS", "086790.KS", "293940.KS"].includes(holding?.symbol ?? "")) return "국내 주식";
+  if (/msci\s*korea|korea\s*tr|(?:kodex|tiger)-msci-kr/i.test(`${holding?.name ?? ""} ${holding?.symbol ?? ""}`)) return "국내 주식";
   if (accountType === "코인") return "가상자산";
   if (accountType === "펀드") return "펀드";
   if (holding?.assetClass === "현금성·금융상품") return "채권·현금성";

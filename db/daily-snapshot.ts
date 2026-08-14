@@ -43,6 +43,7 @@ function accountPerformance(accounts: Account[], type: string, holdings: Holding
 
 function isDomesticHolding(accountType: string, holding: Holding) {
   if (["005935.KS", "086790.KS", "293940.KS"].includes(holding.symbol)) return true;
+  if (/msci\s*korea|korea\s*tr|(?:kodex|tiger)-msci-kr/i.test(`${holding.name ?? ""} ${holding.symbol}`)) return true;
   if (accountType === "코인" || accountType === "펀드" || holding.assetClass === "현금성·금융상품") return false;
   const text = `${holding.name ?? ""} ${holding.symbol}`.toLowerCase();
   if (/금|gold|iau|gdx|리츠|reit|원자재|commodity|국채|채권|bond|미국채/.test(text)) return false;
