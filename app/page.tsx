@@ -25,7 +25,7 @@ const initialAccounts: Account[] = [
   { id: 7, type: "코인", broker: "미연결", name: "코인 계좌", amount: 0, returnRate: 0, color: "blue" },
 ];
 const reports = ["일", "주", "월", "분기", "반기", "1년"];
-const won = new Intl.NumberFormat("ko-KR", { style: "currency", currency: "KRW", maximumFractionDigits: 0 });
+const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const accountLabel = (name: string) => name.replace(/\s*[·ㆍ]\s*\d[\d-]*$/u, "");
 const assetTypeMeta: Record<AssetType, { color: string }> = {
