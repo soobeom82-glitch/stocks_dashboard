@@ -123,6 +123,7 @@ export default function Home() {
   const [pensionQuoteUpdatedAt, setPensionQuoteUpdatedAt] = useState("");
   const [irpQuoteUpdatedAt, setIrpQuoteUpdatedAt] = useState("");
   const [expandedAccountId, setExpandedAccountId] = useState<number | null>(null);
+  const [selectedAssetType, setSelectedAssetType] = useState<AssetType | null>(null);
   const [imports, setImports] = useState<ScreenshotImport[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [hydrated, setHydrated] = useState(false);
@@ -175,6 +176,35 @@ export default function Home() {
       return `${colorHex[item.color]} ${start}% ${offset}%`;
     }).join(", ");
   }, [assetAllocationByType, total]);
+  const assetDetailsByType = useMemo(() => {
+    const details = {} as Record<AssetType, { accounts: Map<number, number>; holdings: Array<{ account: Account; holding: Holding; value: number }> }>;
+    (Object.keys(assetTypeMeta) as AssetType[]).forEach(type => { details[type] = { accounts: new Map(), holdings: [] }; });
+    const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
+      { positions: holdings, exchangeRate: 1 }, { positions: usdHoldings, exchangeRate: usdKrwRate }, { positions: fundHoldings, exchangeRate: 1 },
+      { positions: coinHoldings, exchangeRate: 1 }, { positions: pensionHoldings, exchangeRate: 1 }, { positions: isaHoldings, exchangeRate: 1 }, { positions: irpHoldings, exchangeRate: 1 },
+    ];
+    const positionsByAccount = new Map<number, Array<{ holding: Holding; value: number }>>();
+    sources.forEach(({ positions, exchangeRate }) => positions.forEach(holding => {
+      if (!holding.accountId) return;
+      const items = positionsByAccount.get(holding.accountId) ?? [];
+      items.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate });
+      positionsByAccount.set(holding.accountId, items);
+    }));
+    accounts.forEach(account => {
+      const positions = positionsByAccount.get(account.id) ?? [];
+      const positionsTotal = positions.reduce((sum, item) => sum + item.value, 0);
+      if (!positionsTotal) { details[assetTypeFor(account.type)].accounts.set(account.id, account.amount); return; }
+      positions.forEach(({ holding, value }) => {
+        const allocatedValue = account.amount * value / positionsTotal;
+        const type = assetTypeFor(account.type, holding);
+        const detail = details[type];
+        detail.accounts.set(account.id, (detail.accounts.get(account.id) ?? 0) + allocatedValue);
+        detail.holdings.push({ account, holding, value: allocatedValue });
+      });
+    });
+    return details;
+  }, [accounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+  const selectedAssetDetails = selectedAssetType ? assetDetailsByType[selectedAssetType] : null;
   const dailyChange = useMemo(() => snapshots.length > 1 ? (snapshots.at(-1)!.total / snapshots.at(-2)!.total - 1) * 100 : null, [snapshots]);
 
   const updateStockAccounts = (type: string, next: Holding[], exchangeRate = 1) => setAccounts(current => current.map(account => {
@@ -282,7 +312,7 @@ export default function Home() {
     {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>닫기</button></div>}
     <section className="metrics"><article className="metric-card main-metric"><p>통합 평가자산</p><strong>{won.format(total)}</strong><span>등록된 보유 종목 기준</span></article><article className="metric-card"><p>통합 수익률</p><strong>{total > 0 ? percent(weightedReturn) : "-"}</strong><span>매입금액 대비</span></article><article className="metric-card"><p>운용 계좌</p><strong>{accounts.filter(account => account.amount > 0).length}<small>개</small></strong><span>등록 가능한 7개 자산 유형</span></article><article className="metric-card"><p>이번 달 수익</p><strong>{total > 0 ? won.format(0) : "-"}</strong><span>거래 내역 등록 후 제공</span></article></section>
     <section className="content-grid"><article className="panel performance-panel"><div className="panel-head"><div><p className="eyebrow">PERFORMANCE</p><h2>통합 자산 추이</h2></div></div><div className="periods" role="tablist">{reports.map((item, index) => <button key={item} role="tab" aria-selected={period === index} className={period === index ? "selected" : ""} onClick={() => setPeriod(index)}>{item}</button>)}</div><div className="report-value"><div><span>{reports[period]}간 수익률</span><strong>{dailyChange === null ? "비교 기준 생성 중" : percent(dailyChange)}</strong></div><span className="report-description">매일 첫 조회 시점의 통합 평가자산을 저장합니다</span></div><TrendChart snapshots={snapshots} /></article><article className="panel allocation"><div className="panel-head"><div><p className="eyebrow">ALLOCATION</p><h2>계좌 유형별 비중</h2></div><button className="dots">•••</button></div><div className="donut" style={{ background: `conic-gradient(${allocationGradient})` }}><div><strong>{accounts.length}</strong><span>연결 계좌</span></div></div><div className="legend">{allocationByType.map(item => <div key={item.type}><i className={item.color}/><span>{item.type}</span><b>{total > 0 ? (item.amount / total * 100).toFixed(1) : "0.0"}%</b></div>)}</div></article></section>
-    <section className="panel asset-allocation-panel"><div className="panel-head"><div><p className="eyebrow">ASSET ALLOCATION</p><h2>자산 유형별 비중</h2></div></div><p className="account-hint">계좌가 아닌 보유 종목·상품의 성격을 기준으로 합산합니다.</p><div className="asset-allocation-body"><div className="donut" style={{ background: `conic-gradient(${assetAllocationGradient})` }}><div><strong>{assetAllocationByType.length}</strong><span>자산 유형</span></div></div><div className="legend">{assetAllocationByType.map(item => <div key={item.type}><i className={item.color}/><span>{item.type}</span><b>{total > 0 ? (item.amount / total * 100).toFixed(1) : "0.0"}%</b></div>)}</div></div></section>
+    <section className="panel asset-allocation-panel"><div className="panel-head"><div><p className="eyebrow">ASSET ALLOCATION</p><h2>자산 유형별 비중</h2></div></div><p className="account-hint">계좌가 아닌 보유 종목·상품의 성격을 기준으로 합산합니다. 유형을 클릭하면 계좌와 종목을 볼 수 있습니다.</p><div className="asset-allocation-body"><div className="donut" style={{ background: `conic-gradient(${assetAllocationGradient})` }}><div><strong>{assetAllocationByType.length}</strong><span>자산 유형</span></div></div><div className="legend asset-legend">{assetAllocationByType.map(item => <button key={item.type} className={selectedAssetType === item.type ? "selected" : ""} onClick={() => setSelectedAssetType(current => current === item.type ? null : item.type)} aria-expanded={selectedAssetType === item.type}><i className={item.color}/><span>{item.type}</span><b>{total > 0 ? (item.amount / total * 100).toFixed(1) : "0.0"}%</b><small>›</small></button>)}</div></div>{selectedAssetType && selectedAssetDetails && <div className="asset-detail"><div className="asset-detail-head"><div><p className="eyebrow">{selectedAssetType.toUpperCase()}</p><h3>{selectedAssetType} 상세</h3></div><button onClick={() => setSelectedAssetType(null)}>닫기</button></div><div className="asset-detail-grid"><div><h4>포함 계좌</h4><div className="asset-detail-list">{[...selectedAssetDetails.accounts.entries()].sort((a, b) => b[1] - a[1]).map(([accountId, amount]) => { const account = accounts.find(item => item.id === accountId); return account && <div key={accountId}><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span><strong>{won.format(amount)}</strong></div>; })}</div></div><div><h4>보유 종목</h4><div className="asset-detail-list">{selectedAssetDetails.holdings.length ? [...selectedAssetDetails.holdings].sort((a, b) => b.value - a.value).map(({ account, holding, value }) => <div key={`${account.id}-${holding.symbol}-${holding.name}`}><span><b>{holding.name}</b><small>{accountLabel(account.name)} · {holding.symbol}</small></span><strong>{won.format(value)}</strong></div>) : <p className="asset-empty">등록된 종목 정보가 없습니다.</p>}</div></div></div></div>}</section>
     <section className="accounts-section"><div className="panel-head"><div><p className="eyebrow">ACCOUNTS</p><h2>계좌별 자산</h2></div></div><p className="account-hint">평가금액이 큰 계좌부터 표시됩니다. 계좌를 클릭하면 보유자산 상세와 현재가를 확인할 수 있습니다.</p><div className="account-table"><div className="table-heading"><span>계좌</span><span>평가금액</span><span>수익률</span><span>비중</span><span/></div>{accountsByValue.map(account => { const details = detailsFor(account); return <div className="account-item" key={account.id}><div className={`account-row ${expandedAccountId === account.id ? "expanded" : ""}`} role="button" tabIndex={0} onClick={() => setExpandedAccountId(current => current === account.id ? null : account.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedAccountId(current => current === account.id ? null : account.id); } }}><div><span className={`account-icon ${account.color}`}>{account.type.slice(0, 1)}</span><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span></div><strong>{won.format(account.amount)}</strong><strong className={account.returnRate >= 0 ? "positive" : "negative"}>{percent(account.returnRate)}</strong><div className="weight"><i><em style={{ width: `${total > 0 ? account.amount / total * 100 : 0}%` }}/></i><span>{total > 0 ? (account.amount / total * 100).toFixed(1) : "0.0"}%</span></div><span className="row-actions"><i className="expand-arrow" aria-hidden="true">{expandedAccountId === account.id ? "⌃" : "⌄"}</i></span></div>{expandedAccountId === account.id && <AccountDetails account={account} {...details} />}</div>; })}</div></section>
   </main>;
 }
