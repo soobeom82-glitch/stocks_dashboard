@@ -72,6 +72,15 @@ const importedUsdHoldings: Holding[] = [
   ["TSLA", "테슬라", 20, 274.6701, 340], ["VT", "글로벌 주식 뱅가드 ETF", 30, 102.53, 162.28],
 ].map(([symbol, name, quantity, averagePrice, fallbackPrice]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(fallbackPrice), accountId: 1 }));
 const importedFundHoldings: Holding[] = [{ symbol: "LIFEPLUS-TDF2040-J-PE", name: "한화 LIFEPLUS 적격 TDF2040 연금 J-Pe", quantity: 1, averagePrice: 3010000, fallbackPrice: 4527457, accountId: 6, unit: "건" }];
+const importedIrpHoldings: Holding[] = [
+  ["TIGER 미국나스닥100", "IRP-NASDAQ100", 452, 30461360, 85235900, "ETF·주식"], ["KIWOOM 인도Nifty50(합성)", "IRP-NIFTY50", 80, 1477800, 1779600, "ETF·주식"],
+  ["TIGER 코리아TOP10", "292150.KS", 732, 9626035, 28203960, "ETF·주식"], ["신한알파리츠", "293940.KS", 1788, 12764590, 9451260, "ETF·주식"],
+  ["KODEX TRF3070", "IRP-TRF3070", 1068, 12466650, 15197640, "ETF·주식"], ["ACE 미국S&P500", "360200.KS", 189, 2346435, 5235360, "ETF·주식"],
+  ["TIGER 차이나전기차SOLACTIVE", "371460.KS", 163, 2773925, 1782405, "ETF·주식"], ["미래에셋증권현금성자산", "IRP-CASH", 1, 1385975, 1385975, "현금성·금융상품"],
+  ["애큐온저축은행예금 IRP(개인) 1Y_퇴직", "IRP-ACCION", 1, 394370, 401192, "현금성·금융상품"], ["(통합)(무)흥국생명보험 퇴직연금 이율보증형 3년 (IRP)", "IRP-HEUNGKUK", 1, 433563, 456789, "현금성·금융상품"],
+  ["(통합)KB손해보험 원리금보장형 이율보증형 3년 (DC/IRP)", "IRP-KB", 1, 1700932, 1740738, "현금성·금융상품"], ["미래에셋증권 디폴트옵션 안정투자형 3년 (DC/IRP)", "IRP-DEFAULT-3Y", 1, 1700932, 1740738, "현금성·금융상품"],
+  ["미래에셋증권 디폴트옵션 안정투자형 포트폴리오 1", "IRP-DEFAULT-P1", 1, 16966169, 17893310, "현금성·금융상품"],
+].map(([name, symbol, quantity, cost, value, assetClass]) => ({ name: String(name), symbol: String(symbol), quantity: Number(quantity), averagePrice: Number(cost) / Number(quantity), fallbackPrice: Number(value) / Number(quantity), accountId: 4, assetClass: assetClass as Holding["assetClass"] }));
 
 function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh }: { account: Account; positions: Holding[]; updatedAt: string; exchangeRate: number; refresh: () => Promise<void> }) {
   const isUsd = account.type === "미국 주식";
@@ -129,6 +138,7 @@ export default function Home() {
   const [imports, setImports] = useState<ScreenshotImport[]>([]);
   const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
   const [profitPeaks, setProfitPeaks] = useState<Record<string, ProfitPeak>>({});
+  const [irpResetVersion, setIrpResetVersion] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const syncErrorShown = useRef(false);
   const total = useMemo(() => accounts.reduce((sum, account) => sum + account.amount, 0), [accounts]);
@@ -284,13 +294,14 @@ export default function Home() {
     let mounted = true;
     void fetch("/api/portfolio").then(async response => {
       if (!response.ok) throw new Error("저장소 조회 실패");
-      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; profitPeaks?: Record<string, ProfitPeak>; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
+      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; profitPeaks?: Record<string, ProfitPeak>; irpResetVersion?: number; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
     }).then(data => {
       if (!mounted || !data.hasData || !data.state) return;
           if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
       if (Array.isArray(data.state.imports)) setImports(data.state.imports);
       if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number").slice(-366));
       if (data.state.profitPeaks && typeof data.state.profitPeaks === "object") setProfitPeaks(data.state.profitPeaks);
+      if (typeof data.state.irpResetVersion === "number") setIrpResetVersion(data.state.irpResetVersion);
       if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => ({ ...item, accountId: item.accountId ?? 2 })));
       if (Array.isArray(data.state.usdHoldings)) setUsdHoldings(data.state.usdHoldings.map(item => ({ ...item, accountId: item.accountId ?? 1 })));
       else setUsdHoldings(importedUsdHoldings);
@@ -303,6 +314,14 @@ export default function Home() {
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
+  useEffect(() => {
+    if (!hydrated || irpResetVersion >= 2) return;
+    const value = importedIrpHoldings.reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0);
+    const cost = importedIrpHoldings.reduce((sum, holding) => sum + holding.quantity * holding.averagePrice, 0);
+    setIrpHoldings(importedIrpHoldings);
+    setAccounts(current => current.map(account => account.id === 4 ? { ...account, amount: value, returnRate: cost > 0 ? (value / cost - 1) * 100 : 0 } : account));
+    setIrpResetVersion(2);
+  }, [hydrated, irpResetVersion]);
   useEffect(() => {
     if (!hydrated || total <= 0) return;
     const date = todayKst();
@@ -326,9 +345,9 @@ export default function Home() {
   }, [hydrated, domesticTopThree]);
   useEffect(() => {
     if (!hydrated) return;
-    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, snapshots, profitPeaks, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
+    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, snapshots, profitPeaks, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
     return () => window.clearTimeout(timer);
-  }, [accounts, imports, snapshots, profitPeaks, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
+  }, [accounts, imports, snapshots, profitPeaks, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
   const detailsFor = (account: Account) => {
     if (account.type === "미국 주식") return { positions: usdHoldings.filter(item => item.accountId === account.id), updatedAt: usdQuoteUpdatedAt, exchangeRate: usdKrwRate, refresh: refreshUsdPrices };
     if (account.type === "펀드") return { positions: fundHoldings.filter(item => item.accountId === account.id), updatedAt: "", exchangeRate: 1, refresh: async () => undefined };
