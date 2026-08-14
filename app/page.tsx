@@ -183,9 +183,8 @@ export default function Home() {
     if (!hydrated || total <= 0) return;
     const date = todayKst();
     setSnapshots(current => {
-      const withoutToday = current.filter(snapshot => snapshot.date !== date);
-      const next = [...withoutToday, { date, total }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
-      return JSON.stringify(next) === JSON.stringify(current) ? current : next;
+      if (current.some(snapshot => snapshot.date === date)) return current;
+      return [...current, { date, total }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
     });
   }, [hydrated, total]);
   useEffect(() => {
