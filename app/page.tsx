@@ -23,6 +23,15 @@ const reports = ["일", "주", "월", "분기", "반기", "1년"];
 const won = new Intl.NumberFormat("ko-KR", { style: "currency", currency: "KRW", maximumFractionDigits: 0 });
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const accountLabel = (name: string) => name.replace(/\s*[·ㆍ]\s*\d[\d-]*$/u, "");
+const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
+  1: { name: "미국 주식 계좌", broker: "키움증권" },
+  2: { name: "국내 주식 계좌", broker: "삼성증권" },
+  3: { name: "ISA 중개형 계좌", broker: "한화투자증권" },
+  4: { name: "IRP 계좌", broker: "미래에셋증권" },
+  5: { name: "연금저축 계좌", broker: "삼성증권" },
+  8: { name: "국내 주식 계좌 2", broker: "대신증권" },
+};
+const normalizeAccounts = (accounts: Account[]) => accounts.map(account => accountProfile[account.id] ? { ...account, ...accountProfile[account.id] } : account);
 // 사용자가 제공한 미국 주식 잔고 화면의 수량·달러 평단가입니다. 현재가는 조회 시 갱신됩니다.
 const importedUsdHoldings: Holding[] = [
   ["AAPL", "애플", 1, 145.9766, 304.56], ["GDX", "금광 반에크 ETF", 5, 30.57, 87.79], ["HLT", "힐튼 월드와이드 홀딩스", 5, 180.5, 320.82],
@@ -142,7 +151,7 @@ export default function Home() {
       return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; holdings?: Holding[]; usdHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
     }).then(data => {
       if (!mounted || !data.hasData || !data.state) return;
-      if (Array.isArray(data.state.accounts)) setAccounts(data.state.accounts);
+          if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
       if (Array.isArray(data.state.imports)) setImports(data.state.imports);
       if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => ({ ...item, accountId: item.accountId ?? 2 })));
       if (Array.isArray(data.state.usdHoldings)) setUsdHoldings(data.state.usdHoldings.map(item => ({ ...item, accountId: item.accountId ?? 1 })));
