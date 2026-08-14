@@ -2,7 +2,7 @@
 
 :root { --ink:#1f2430; --muted:#747b8d; --line:#e8eaf0; --purple:#5666df; --soft:#f6f7fb; }
 .content-grid:has(.performance-panel:only-child) { grid-template-columns:1fr; }
-.domestic-rank{display:none}.accounts-section .table-heading,.accounts-section .account-row,.domestic-top-chart .domestic-top-heading,.domestic-top-chart .domestic-top-row{grid-template-columns:minmax(220px,.75fr) minmax(150px,.9fr) minmax(110px,.65fr) minmax(150px,.9fr) minmax(100px,.65fr)}.domestic-top-chart .domestic-top-heading span:first-child{grid-column:auto}@media(max-width:760px){.domestic-top-chart .domestic-top-row{grid-template-columns:minmax(0,1fr) auto}.domestic-top-chart .domestic-name,.domestic-top-chart .domestic-value{grid-column:1}.domestic-top-chart .domestic-rate{grid-column:2}.domestic-top-chart .domestic-profit{grid-column:2}.domestic-top-chart .domestic-peak{grid-column:1}}
+.domestic-top-chart .domestic-top-row .domestic-rank{display:none!important}.accounts-section .table-heading,.accounts-section .account-row,.domestic-top-chart .domestic-top-heading,.domestic-top-chart .domestic-top-row{grid-template-columns:minmax(220px,.75fr) minmax(150px,.9fr) minmax(110px,.65fr) minmax(150px,.9fr) minmax(100px,.65fr)}.domestic-top-chart .domestic-top-heading span:first-child{grid-column:auto}@media(max-width:760px){.domestic-top-chart .domestic-top-row{grid-template-columns:minmax(0,1fr) auto}.domestic-top-chart .domestic-name,.domestic-top-chart .domestic-value{grid-column:1}.domestic-top-chart .domestic-rate{grid-column:2}.domestic-top-chart .domestic-profit{grid-column:2}.domestic-top-chart .domestic-peak{grid-column:1}}
 
 @theme inline {
   --color-background: var(--background);
