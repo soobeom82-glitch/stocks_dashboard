@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 :root { --ink:#1f2430; --muted:#747b8d; --line:#e8eaf0; --purple:#5666df; --soft:#f6f7fb; }
+.content-grid:has(.performance-panel:only-child) { grid-template-columns:1fr; }
 
 @theme inline {
   --color-background: var(--background);
