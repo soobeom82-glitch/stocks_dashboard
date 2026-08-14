@@ -14,10 +14,17 @@ async function latestPrice(symbol: string): Promise<number | null> {
   return result?.indicators?.quote?.[0]?.close?.filter((value): value is number => typeof value === "number" && value > 0).at(-1) ?? null;
 }
 
+async function usdKrwRate(): Promise<number | null> {
+  return latestPrice("KRW=X");
+}
+
 export async function GET(request: Request) {
-  const raw = new URL(request.url).searchParams.get("symbols") ?? "";
+  const params = new URL(request.url).searchParams;
+  const raw = params.get("symbols") ?? "";
+  const includeExchangeRate = params.get("includeExchangeRate") === "1";
   const symbols = [...new Set(raw.split(",").map(value => value.trim().toUpperCase()).filter(value => /^[A-Z0-9.^-]{1,15}$/.test(value)))].slice(0, MAX_SYMBOLS);
   const entries = await Promise.all(symbols.map(async symbol => [symbol, await latestPrice(symbol)] as const));
   const quotes = Object.fromEntries(entries.filter((entry): entry is [string, number] => entry[1] !== null));
-  return Response.json({ quotes, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "public, max-age=21600" } });
+  const exchangeRate = includeExchangeRate ? await usdKrwRate() : null;
+  return Response.json({ quotes, exchangeRate, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "public, max-age=21600" } });
 }
