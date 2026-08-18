@@ -1,4 +1,4 @@
-type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string };
+type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string; marketPrice?: number };
 type Account = { id: number; type: string; amount: number; returnRate: number };
 type ProfitPeak = { profit: number; date: string };
 type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; accountAmounts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
@@ -78,17 +78,22 @@ export async function saveDailyPortfolioSnapshot() {
   const usd = await refreshStockPrices(state.usdHoldings ?? []);
   const usdKrw = await quote("KRW=X") ?? 1380;
   const coins = await refreshCoinPrices(state.coinHoldings ?? []);
+  const irpHoldings = state.irpHoldings ?? [];
+  const irpQuoted = await refreshStockPrices(irpHoldings.filter(holding => holding.assetClass === "ETF·주식" && holding.symbol.endsWith(".KS")));
+  const irpPrices = Object.fromEntries(irpQuoted.holdings.map(holding => [holding.symbol, holding.fallbackPrice]));
+  const irp = irpHoldings.map(holding => irpPrices[holding.symbol] ? { ...holding, fallbackPrice: irpPrices[holding.symbol], marketPrice: irpPrices[holding.symbol] } : holding);
   let accounts = accountPerformance(state.accounts, "국내 주식", domestic.holdings);
   accounts = accountPerformance(accounts, "ISA", isa.holdings);
   accounts = accountPerformance(accounts, "연금저축", pension.holdings);
   accounts = accountPerformance(accounts, "미국 주식", usd.holdings, usdKrw);
   accounts = accountPerformance(accounts, "코인", coins);
+  accounts = accountPerformance(accounts, "IRP", irp);
   const total = accounts.reduce((sum, account) => sum + account.amount, 0);
   const date = KST_DATE();
   const accountAmounts = Object.fromEntries(accounts.map(account => [String(account.id), account.amount]));
-  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, accountAmounts }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
-  const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: state.irpHoldings ?? [] }], date);
-  const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, snapshots, profitPeaks });
+  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, accountAmounts }].sort((a, b) => a.date.localeCompare(b.date));
+  const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: irp }], date);
+  const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks });
   await saveDashboardState(payload);
 }
 import { loadDashboardState, saveDashboardState } from "./index";

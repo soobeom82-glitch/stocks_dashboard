@@ -313,7 +313,7 @@ export default function Home() {
   const refreshIrpPrices = async () => {
     const symbols = irpHoldings.filter(item => item.assetClass === "ETF·주식" && item.symbol.endsWith(".KS")).map(item => item.symbol);
     if (!symbols.length) { setNotice("현재가를 반영할 IRP ETF가 없습니다."); return; }
-    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`); const data = await response.json() as { quotes?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => current.map(holding => ({ ...holding, marketPrice: data.quotes?.[holding.symbol] ?? holding.marketPrice }))); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
+    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`); const data = await response.json() as { quotes?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
   };
   useEffect(() => { if (holdings.length) void refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt); }, [holdings.length]);
   useEffect(() => { if (usdHoldings.length) void refreshUsdPrices(); }, [usdHoldings.length]);
@@ -330,7 +330,7 @@ export default function Home() {
       if (!mounted || !data.hasData || !data.state) return;
           if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
       if (Array.isArray(data.state.imports)) setImports(data.state.imports);
-      if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number").slice(-366));
+      if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number"));
       if (data.state.profitPeaks && typeof data.state.profitPeaks === "object") setProfitPeaks(data.state.profitPeaks);
       if (typeof data.state.irpResetVersion === "number") setIrpResetVersion(data.state.irpResetVersion);
       if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => ({ ...item, accountId: item.accountId ?? 2 })));
@@ -360,7 +360,7 @@ export default function Home() {
     setSnapshots(current => {
       const existing = current.find(snapshot => snapshot.date === date);
       if (existing) return existing.accountAmounts ? current : current.map(snapshot => snapshot.date === date ? { ...snapshot, accountAmounts } : snapshot);
-      return [...current, { date, total, accountAmounts }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
+      return [...current, { date, total, accountAmounts }].sort((a, b) => a.date.localeCompare(b.date));
     });
   }, [accounts, hydrated, total]);
   useEffect(() => {
