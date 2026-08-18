@@ -7,7 +7,7 @@ export async function GET(request: Request) {
 
   try {
     const response = await fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets.join(","))}`, {
-      cf: { cacheTtl: 60 * 60 * 6, cacheEverything: true },
+      next: { revalidate: 21600 },
     });
     if (!response.ok) throw new Error("Upbit quote request failed");
     const rows = await response.json() as Array<{ market?: string; trade_price?: number }>;

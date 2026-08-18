@@ -4,7 +4,7 @@ async function latestPrice(symbol: string): Promise<number | null> {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
   const response = await fetch(url, {
     headers: { "User-Agent": "PortfolioDashboard/1.0" },
-    cf: { cacheTtl: 60 * 60 * 6, cacheEverything: true },
+    next: { revalidate: 21600 },
   });
   if (!response.ok) return null;
   const body = await response.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number }; indicators?: { quote?: Array<{ close?: Array<number | null> }> } }> } };

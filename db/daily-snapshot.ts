@@ -6,7 +6,7 @@ type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?:
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 
 async function quote(symbol: string): Promise<number | null> {
-  const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`, { headers: { "User-Agent": "PortfolioDashboard/1.0" }, cf: { cacheTtl: 60 * 60 * 6, cacheEverything: true } });
+  const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`, { headers: { "User-Agent": "PortfolioDashboard/1.0" }, next: { revalidate: 21600 } });
   if (!response.ok) return null;
   const data = await response.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number } }> } };
   const price = data.chart?.result?.[0]?.meta?.regularMarketPrice;
@@ -23,7 +23,7 @@ async function refreshStockPrices(holdings: Holding[], exchangeRate = 1) {
 async function refreshCoinPrices(holdings: Holding[]) {
   if (!holdings.length) return holdings;
   const markets = holdings.map(holding => `KRW-${holding.symbol}`).join(",");
-  const response = await fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets)}`, { cf: { cacheTtl: 60 * 60 * 6, cacheEverything: true } });
+  const response = await fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets)}`, { next: { revalidate: 21600 } });
   if (!response.ok) return holdings;
   const data = await response.json() as Array<{ market: string; trade_price: number }>;
   const prices = Object.fromEntries(data.map(item => [item.market, item.trade_price]));
@@ -66,8 +66,8 @@ function updateProfitPeaks(state: PortfolioState, accounts: Account[], groups: A
   return peaks;
 }
 
-export async function saveDailyPortfolioSnapshot(db: D1Database) {
-  const saved = await db.prepare("SELECT payload FROM dashboard_state WHERE scope = ? LIMIT 1").bind("owner").first<{ payload: string }>();
+export async function saveDailyPortfolioSnapshot() {
+  const saved = await loadDashboardState();
   if (!saved) return;
   const state = JSON.parse(saved.payload) as PortfolioState;
   if (!Array.isArray(state.accounts)) return;
@@ -88,5 +88,6 @@ export async function saveDailyPortfolioSnapshot(db: D1Database) {
   const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: state.irpHoldings ?? [] }], date);
   const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, snapshots, profitPeaks });
-  await db.prepare("UPDATE dashboard_state SET payload = ?, updated_at = ? WHERE scope = ?").bind(payload, new Date().toISOString(), "owner").run();
+  await saveDashboardState(payload);
 }
+import { loadDashboardState, saveDashboardState } from "./index";

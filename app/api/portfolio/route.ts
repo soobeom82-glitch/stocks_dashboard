@@ -1,8 +1,5 @@
-import { eq } from "drizzle-orm";
-import { getDb } from "../../../db";
-import { dashboardState } from "../../../db/schema";
+import { loadDashboardState, saveDashboardState } from "../../../db";
 
-const OWNER_SCOPE = "owner";
 const MAX_PAYLOAD_SIZE = 1_000_000;
 
 type DashboardPayload = {
@@ -30,17 +27,12 @@ function errorResponse(error: unknown) {
 
 export async function GET() {
   try {
-    const db = getDb();
-    const [saved] = await db
-      .select({ payload: dashboardState.payload, updatedAt: dashboardState.updatedAt })
-      .from(dashboardState)
-      .where(eq(dashboardState.scope, OWNER_SCOPE))
-      .limit(1);
+    const saved = await loadDashboardState();
 
     if (!saved) return Response.json({ hasData: false });
     const state = JSON.parse(saved.payload) as unknown;
     if (!isPayload(state)) throw new Error("Invalid dashboard payload");
-    return Response.json({ hasData: true, state, updatedAt: saved.updatedAt });
+    return Response.json({ hasData: true, state, updatedAt: saved.updated_at });
   } catch (error) {
     return errorResponse(error);
   }
@@ -58,14 +50,7 @@ export async function PUT(request: Request) {
       return Response.json({ error: "저장할 데이터가 너무 큽니다." }, { status: 413 });
     }
 
-    const db = getDb();
-    await db
-      .insert(dashboardState)
-      .values({ scope: OWNER_SCOPE, payload })
-      .onConflictDoUpdate({
-        target: dashboardState.scope,
-        set: { payload, updatedAt: new Date().toISOString() },
-      });
+    await saveDashboardState(payload);
 
     return Response.json({ saved: true });
   } catch (error) {
