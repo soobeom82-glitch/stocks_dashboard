@@ -1,7 +1,7 @@
 type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string };
 type Account = { id: number; type: string; amount: number; returnRate: number };
 type ProfitPeak = { profit: number; date: string };
-type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number }>; profitPeaks?: Record<string, ProfitPeak> };
+type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; accountAmounts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 
@@ -85,7 +85,8 @@ export async function saveDailyPortfolioSnapshot() {
   accounts = accountPerformance(accounts, "코인", coins);
   const total = accounts.reduce((sum, account) => sum + account.amount, 0);
   const date = KST_DATE();
-  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
+  const accountAmounts = Object.fromEntries(accounts.map(account => [String(account.id), account.amount]));
+  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, accountAmounts }].sort((a, b) => a.date.localeCompare(b.date)).slice(-366);
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: state.irpHoldings ?? [] }], date);
   const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, snapshots, profitPeaks });
   await saveDashboardState(payload);
