@@ -69,10 +69,14 @@ const todayKst = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul"
 
 function TrendChart({ snapshots }: { snapshots: Snapshot[] }) {
   if (snapshots.length < 2) return <div className="chart empty-chart">오늘 평가금액을 기준선으로 저장했습니다. 내일부터 일별 자산 추이가 표시됩니다.</div>;
-  const values = snapshots.map(snapshot => snapshot.total);
-  const min = Math.min(...values); const max = Math.max(...values); const range = max - min || 1;
-  const points = values.map((value, index) => `${index / (values.length - 1) * 100},${88 - (value - min) / range * 72}`).join(" ");
-  return <div className="trend-chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="통합 자산 추이"><polyline points={points} fill="none" stroke="#5666df" strokeWidth="2.5" vectorEffect="non-scaling-stroke" /><polyline points={`0,100 ${points} 100,100`} fill="#5666df12" stroke="none" /></svg><div className="trend-labels"><span>{snapshots[0].date.slice(5).replace("-", ".")}</span><span>{snapshots.at(-1)?.date.slice(5).replace("-", ".")}</span></div></div>;
+  const base = snapshots[0].total;
+  const returns = snapshots.map(snapshot => (snapshot.total / base - 1) * 100);
+  const axisRate = Math.max(...returns.map(value => Math.abs(value)), 0.1) * 1.15;
+  const axisProfit = base * axisRate / 100;
+  const points = returns.map((rate, index) => `${index / (returns.length - 1) * 100},${50 - rate / axisRate * 40}`).join(" ");
+  const rateLabel = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  const profitLabel = (value: number) => `${value >= 0 ? "+" : ""}${won.format(value)}`;
+  return <div className="trend-chart"><div className="trend-axis trend-rate-axis" aria-label="수익률 축"><span>{rateLabel(axisRate)}</span><span>0.00%</span><span>{rateLabel(-axisRate)}</span></div><div className="trend-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="통합 자산 수익률 추이"><polyline points={points} fill="none" stroke="#5666df" strokeWidth="2.5" vectorEffect="non-scaling-stroke" /><polyline points={`0,100 ${points} 100,100`} fill="#5666df12" stroke="none" /></svg></div><div className="trend-axis trend-profit-axis" aria-label="수익금 축"><span>{profitLabel(axisProfit)}</span><span>0</span><span>{profitLabel(-axisProfit)}</span></div><div className="trend-labels"><span>{snapshots[0].date.slice(5).replace("-", ".")}</span><span>{snapshots.at(-1)?.date.slice(5).replace("-", ".")}</span></div></div>;
 }
 // 사용자가 제공한 미국 주식 잔고 화면의 수량·달러 평단가입니다. 현재가는 조회 시 갱신됩니다.
 const importedUsdHoldings: Holding[] = [
