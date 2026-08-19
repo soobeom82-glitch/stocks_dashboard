@@ -368,7 +368,11 @@ export default function Home() {
     const hasAccountAmounts = portfolioAccounts.some(account => typeof snapshot.accountAmounts?.[String(account.id)] === "number");
     const hasAccountCosts = portfolioAccounts.some(account => typeof snapshot.accountCosts?.[String(account.id)] === "number");
     const amount = hasAccountAmounts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountAmounts?.[String(account.id)] ?? 0), 0) : snapshot.total;
-    const cost = hasAccountCosts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0) : (snapshot.cost ?? 0);
+    const estimatedCost = portfolioAccounts.reduce((sum, account) => {
+      const accountAmount = snapshot.accountAmounts?.[String(account.id)] ?? 0;
+      return sum + (account.returnRate > -100 ? accountAmount / (1 + account.returnRate / 100) : 0);
+    }, 0);
+    const cost = hasAccountCosts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0) : (snapshot.cost ?? estimatedCost);
     return { ...snapshot, total: amount, cost };
   }), [periodSnapshots, portfolioAccounts]);
   const trendItems = useMemo(() => [
