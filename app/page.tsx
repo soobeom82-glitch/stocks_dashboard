@@ -122,14 +122,17 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
     ...positions.map((holding, index) => ({ id: `holding-${account.id}-${index}-${holding.symbol}`, name: holding.name, color: ["#5666df", "#f5a641", "#3fb99e", "#e878a9", "#8d71e8", "#ecc950"][index % 6], currentCost: holding.quantity * holding.averagePrice * (isUsd ? exchangeRate : 1), snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.holdingAmounts?.[holdingSnapshotKey(account.id, holding)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.holdingCosts?.[holdingSnapshotKey(account.id, holding)] }] : []; }) })),
   ];
   const visibleHoldingTrendItems = holdingTrendItems.filter(item => selectedTrendItems.includes(item.id));
-  const irpRiskyAmount = isIrp ? positions.filter(holding => holding.assetClass === "ETF·주식").reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0) : 0;
+  // 증권사 위험자산 산정 화면(2026-08-19)과 맞춘 상품별 분류입니다.
+  // TRF3070과 차이나전기차 SOLACTIVE는 이 계좌에서 위험자산 투자비율에 포함되지 않습니다.
+  const irpExcludedRiskSymbols = new Set(["IRP-TRF3070", "371460.KS"]);
+  const irpRiskyAmount = isIrp ? positions.filter(holding => holding.assetClass === "ETF·주식" && !irpExcludedRiskSymbols.has(holding.symbol)).reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0) : 0;
   const irpRiskyRate = account.amount > 0 ? irpRiskyAmount / account.amount * 100 : 0;
   const contributionLimits = account.type === "ISA"
     ? [{ label: "총 납입금액", value: "17,520,578원" }, { label: "추가 납입 가능금액", value: "22,479,422원 / 한도 4,000만원" }, { label: "가입 기간", value: "2025.08.14 ~ 2125.08.14" }]
     : account.type === "연금저축"
-      ? [{ label: "올해 연금저축 납입", value: "600만원 / 세액공제 한도 600만원" }, { label: "연금계좌 합산 잔여 납입", value: "1,200만원 / 연 1,800만원" }, { label: "세액공제 합산 잔여", value: "300만원 / 연 900만원" }]
+      ? [{ label: "올해 연금저축 납입", value: "600만원 / 세액공제 한도 600만원" }, { label: "연금계좌 합산 올해 납입", value: "900만원 / 연 1,800만원" }, { label: "합산 잔여 납입 · 세액공제", value: "900만원 · 0원 / 연 900만원" }]
       : isIrp
-        ? [{ label: "연금저축 반영 납입액", value: "600만원" }, { label: "연금계좌 합산 잔여 납입", value: "1,200만원 / 연 1,800만원" }, { label: "세액공제 합산 잔여", value: "300만원 / 연 900만원" }]
+        ? [{ label: "올해 IRP 납입", value: "300만원" }, { label: "연금계좌 합산 올해 납입", value: "900만원 / 연 1,800만원" }, { label: "합산 잔여 납입 · 세액공제", value: "900만원 · 0원 / 연 900만원" }]
         : [];
 
   if (!isUsd && !isCoin && !isFund && !isKrwStock && !isIrp) return <div className="account-expanded empty-account-detail">등록된 보유자산이 없습니다.</div>;
