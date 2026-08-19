@@ -30,6 +30,11 @@ const initialPortfolios: Portfolio[] = [
   { id: "kim-seoha", name: "김서하" },
   { id: "kim-eunho", name: "김은호" },
 ];
+const seohaPensionAccount: Account = { id: 9, type: "연금저축", broker: "대신증권", name: "연금저축 계좌", amount: 429371, returnRate: 7.86, color: "pink", portfolioId: "kim-seoha" };
+const seohaPensionHoldings: Holding[] = [
+  { symbol: "RISE-US-SP500", name: "RISE 미국S&P500", quantity: 16, averagePrice: 21578, fallbackPrice: 23224.125, accountId: 9 },
+  { symbol: "CASH-KRW", name: "예수금", quantity: 1, averagePrice: 57785, fallbackPrice: 57785, accountId: 9, unit: "원" },
+];
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -177,7 +182,7 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
 }
 
 export default function Home() {
-  const [accounts, setAccounts] = useState(() => normalizeAccounts(initialAccounts));
+  const [accounts, setAccounts] = useState<Account[]>(() => normalizeAccounts(initialAccounts));
   const [portfolios, setPortfolios] = useState<Portfolio[]>(initialPortfolios);
   const [activePortfolioId, setActivePortfolioId] = useState("kim-soobeom");
   const [period, setPeriod] = useState<ReportPeriod>("최대");
@@ -485,6 +490,8 @@ export default function Home() {
       if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings.map(item => ({ ...item, accountId: item.accountId ?? 5 })));
       if (Array.isArray(data.state.isaHoldings)) setIsaHoldings(data.state.isaHoldings.map(item => ({ ...item, accountId: item.accountId ?? 3 })));
       if (Array.isArray(data.state.irpHoldings)) setIrpHoldings(data.state.irpHoldings.map(item => ({ ...item, accountId: item.accountId ?? 4 })));
+      if (!data.state.accounts?.some(account => account.id === seohaPensionAccount.id)) setAccounts(current => [...current, seohaPensionAccount]);
+      if (!data.state.pensionHoldings?.some(holding => holding.accountId === seohaPensionAccount.id)) setPensionHoldings(current => [...current, ...seohaPensionHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
