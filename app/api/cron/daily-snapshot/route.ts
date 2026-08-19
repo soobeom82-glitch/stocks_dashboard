@@ -1,4 +1,5 @@
 import { saveDailyPortfolioSnapshot } from "../../../../db/daily-snapshot";
+import { backfillRecentSnapshots } from "../../../../db/historical-backfill";
 
 export const runtime = "nodejs";
 
@@ -9,6 +10,11 @@ export async function GET(request: Request) {
   }
 
   try {
+    const backfillDays = Number(new URL(request.url).searchParams.get("backfillDays"));
+    if (Number.isInteger(backfillDays) && backfillDays > 0 && backfillDays <= 10) {
+      const result = await backfillRecentSnapshots(backfillDays);
+      return Response.json({ saved: true, backfilled: true, ...result, completedAt: new Date().toISOString() });
+    }
     await saveDailyPortfolioSnapshot();
     return Response.json({ saved: true, completedAt: new Date().toISOString() });
   } catch (error) {
