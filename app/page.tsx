@@ -81,7 +81,7 @@ function PerformancePanel({ title, period, onPeriodChange, items, aggregateSerie
   const visibleItems = items.filter(item => selectedItems.includes(item.id));
   const aggregateMode = visibleItems.length === 0;
   const chartSeries = aggregateMode ? [aggregateSeries] : visibleItems;
-  const itemPerformance = (item: TrendSeries) => { const last = item.snapshots.at(-1); const cost = last?.cost ?? item.currentCost ?? 0; const rate = last && cost > 0 ? (last.total / cost - 1) * 100 : null; const profit = last && cost > 0 ? last.total - cost : null; return { rate, profit }; };
+  const itemPerformance = (item: TrendSeries) => { const last = item.snapshots.at(-1); const cost = item.currentCost ?? last?.cost ?? 0; const rate = last && cost > 0 ? (last.total / cost - 1) * 100 : null; const profit = last && cost > 0 ? last.total - cost : null; return { rate, profit }; };
   const headline = aggregateMode ? itemPerformance(aggregateSeries) : null;
   const pickerTotal = items.reduce((sum, item) => sum + (item.snapshots.at(-1)?.total ?? 0), 0);
   const accountPicker = pickerMode === "below" && <div className="trend-account-picker" aria-label={pickerLabel}><div className="trend-account-picker-heading"><span>{pickerColumnLabel}</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{items.map(item => { const { rate, profit } = itemPerformance(item); const amount = item.snapshots.at(-1)?.total ?? 0; const tone = rate === null ? "" : rate >= 0 ? "positive" : "negative"; return <button key={item.id} className={selectedItems.includes(item.id) ? "selected" : ""} onClick={() => onToggleItem(item.id)} aria-pressed={selectedItems.includes(item.id)}><span className="trend-account-name"><i style={{ background: item.color }}>{item.iconLabel}</i><span><b>{item.name}</b>{item.subtitle && <small>{item.subtitle}</small>}</span></span><strong>{won.format(amount)}</strong><strong className={tone}>{rate === null ? "-" : percent(rate)}</strong><strong className={tone}>{profit === null ? "-" : <>{profit >= 0 ? "+" : ""}{won.format(profit)}</>}</strong><span>{pickerTotal > 0 ? (amount / pickerTotal * 100).toFixed(1) : "0.0"}%</span></button>; })}</div>;
@@ -347,9 +347,10 @@ export default function Home() {
       name: asset.type,
       color: colorHex[asset.color],
       currentCost: currentAssetCosts[asset.type],
-      snapshots: periodSnapshots.flatMap(snapshot => {
+      snapshots: periodSnapshots.flatMap((snapshot, index) => {
         const amount = snapshot.assetAmounts?.[asset.type];
-        return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.assetCosts?.[asset.type] }] : [];
+        const isLatest = index === periodSnapshots.length - 1;
+        return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: isLatest ? currentAssetCosts[asset.type] : snapshot.assetCosts?.[asset.type] }] : [];
       }),
     })),
   ], [assetAllocationByType, currentAssetCosts, periodSnapshots]);
