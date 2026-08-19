@@ -8,7 +8,8 @@ import "./account-manager.css";
 import "./accounts.css";
 import "./trend.css";
 
-type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string };
+type Portfolio = { id: string; name: string };
+type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string; portfolioId?: string };
 type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
 type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Partial<Record<AssetType, number>>; assetCosts?: Partial<Record<AssetType, number>>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
@@ -23,6 +24,11 @@ const initialAccounts: Account[] = [
   { id: 5, type: "연금저축", broker: "미연결", name: "연금저축 계좌", amount: 0, returnRate: 0, color: "pink" },
   { id: 6, type: "펀드", broker: "미연결", name: "펀드 계좌", amount: 0, returnRate: 0, color: "yellow" },
   { id: 7, type: "코인", broker: "미연결", name: "코인 계좌", amount: 0, returnRate: 0, color: "blue" },
+];
+const initialPortfolios: Portfolio[] = [
+  { id: "kim-soobeom", name: "김수범" },
+  { id: "kim-seoha", name: "김서하" },
+  { id: "kim-eunho", name: "김은호" },
 ];
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
@@ -57,7 +63,11 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   6: { name: "펀드 계좌", broker: "한화자산운용 PINE" },
   8: { name: "국내 주식 계좌 2", broker: "대신증권" },
 };
-const normalizeAccounts = (accounts: Account[]) => accounts.map(account => accountProfile[account.id] ? { ...account, ...accountProfile[account.id] } : account);
+const normalizeAccounts = (accounts: Account[]) => accounts.map(account => ({
+  ...account,
+  ...(accountProfile[account.id] ?? {}),
+  portfolioId: account.portfolioId ?? "kim-soobeom",
+}));
 const todayKst = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 
 type TrendSeries = { id: string; name: string; color: string; snapshots: Snapshot[]; currentCost?: number; subtitle?: string; iconLabel?: string };
@@ -167,7 +177,9 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
 }
 
 export default function Home() {
-  const [accounts, setAccounts] = useState(initialAccounts);
+  const [accounts, setAccounts] = useState(() => normalizeAccounts(initialAccounts));
+  const [portfolios, setPortfolios] = useState<Portfolio[]>(initialPortfolios);
+  const [activePortfolioId, setActivePortfolioId] = useState("kim-soobeom");
   const [period, setPeriod] = useState<ReportPeriod>("최대");
   const [selectedTrendItems, setSelectedTrendItems] = useState<string[]>([]);
   const [selectedAssetTrendItems, setSelectedAssetTrendItems] = useState<string[]>([]);
@@ -197,13 +209,15 @@ export default function Home() {
   const [irpResetVersion, setIrpResetVersion] = useState(0);
   const [hydrated, setHydrated] = useState(false);
   const syncErrorShown = useRef(false);
-  const total = useMemo(() => accounts.reduce((sum, account) => sum + account.amount, 0), [accounts]);
-  const totalProfit = useMemo(() => accounts.reduce((sum, account) => account.returnRate > -100 ? sum + account.amount - account.amount / (1 + account.returnRate / 100) : sum, 0), [accounts]);
+  const activePortfolio = portfolios.find(item => item.id === activePortfolioId) ?? portfolios[0];
+  const portfolioAccounts = useMemo(() => accounts.filter(account => account.portfolioId === activePortfolio?.id), [accounts, activePortfolio?.id]);
+  const total = useMemo(() => portfolioAccounts.reduce((sum, account) => sum + account.amount, 0), [portfolioAccounts]);
+  const totalProfit = useMemo(() => portfolioAccounts.reduce((sum, account) => account.returnRate > -100 ? sum + account.amount - account.amount / (1 + account.returnRate / 100) : sum, 0), [portfolioAccounts]);
   const weightedReturn = useMemo(() => {
     const totalCost = total - totalProfit;
     return totalCost > 0 ? totalProfit / totalCost * 100 : 0;
   }, [total, totalProfit]);
-  const accountsByValue = useMemo(() => [...accounts].sort((a, b) => b.amount - a.amount), [accounts]);
+  const accountsByValue = useMemo(() => [...portfolioAccounts].sort((a, b) => b.amount - a.amount), [portfolioAccounts]);
   const assetAllocationByType = useMemo(() => {
     const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
       { positions: holdings, exchangeRate: 1 }, { positions: usdHoldings, exchangeRate: usdKrwRate }, { positions: fundHoldings, exchangeRate: 1 },
@@ -218,14 +232,14 @@ export default function Home() {
       positionsByAccount.set(accountId, items);
     }));
     const grouped: Record<AssetType, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
-    accounts.forEach(account => {
+    portfolioAccounts.forEach(account => {
       const positions = positionsByAccount.get(account.id) ?? [];
       const positionsTotal = positions.reduce((sum, item) => sum + item.value, 0);
       if (!positionsTotal) { grouped[assetTypeFor(account.type)] += account.amount; return; }
       positions.forEach(({ holding, value }) => { grouped[assetTypeFor(account.type, holding)] += account.amount * value / positionsTotal; });
     });
     return (Object.entries(grouped) as Array<[AssetType, number]>).filter(([, amount]) => amount > 0).map(([type, amount]) => ({ type, amount, color: assetTypeMeta[type].color })).sort((a, b) => b.amount - a.amount);
-  }, [accounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+  }, [portfolioAccounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
   const assetAllocationGradient = useMemo(() => {
     if (!total || !assetAllocationByType.length) return "#eceef3 0 100%";
     let offset = 0;
@@ -261,7 +275,7 @@ export default function Home() {
     }));
     return costs;
   }, [holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
-  const currentAccountCosts = useMemo(() => Object.fromEntries(accounts.map(account => [String(account.id), account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0])), [accounts]);
+  const currentAccountCosts = useMemo(() => Object.fromEntries(portfolioAccounts.map(account => [String(account.id), account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0])), [portfolioAccounts]);
   const currentAssetCosts = useMemo(() => {
     const grouped: Record<AssetType, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
     const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
@@ -275,21 +289,21 @@ export default function Home() {
       positions.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate, cost: holding.quantity * holding.averagePrice * exchangeRate });
       positionsByAccount.set(holding.accountId, positions);
     }));
-    accounts.forEach(account => {
+    portfolioAccounts.forEach(account => {
       const positions = positionsByAccount.get(account.id) ?? [];
       const value = positions.reduce((sum, item) => sum + item.value, 0);
       if (!value) { grouped[assetTypeFor(account.type)] += currentAccountCosts[String(account.id)] ?? 0; return; }
       positions.forEach(item => { grouped[assetTypeFor(account.type, item.holding)] += item.cost * account.amount / value; });
     });
     return grouped;
-  }, [accounts, coinHoldings, currentAccountCosts, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings, usdKrwRate]);
+  }, [portfolioAccounts, coinHoldings, currentAccountCosts, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings, usdKrwRate]);
   const assetCostsForSnapshot = useMemo(() => {
     const holdingsByKey = new Map<string, Holding>();
     const sources: Array<Holding[]> = [holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings];
     sources.flat().forEach(holding => { if (holding.accountId) holdingsByKey.set(holdingSnapshotKey(holding.accountId, holding), holding); });
     return (snapshot: Snapshot) => {
       const grouped: Record<AssetType, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
-      accounts.forEach(account => {
+      portfolioAccounts.forEach(account => {
         const entries = [...holdingsByKey.entries()].filter(([key]) => key.startsWith(`${account.id}:`)).map(([key, holding]) => ({ holding, value: snapshot.holdingAmounts?.[key] ?? 0, cost: snapshot.holdingCosts?.[key] ?? 0 }));
         const holdingValue = entries.reduce((sum, item) => sum + item.value, 0);
         const accountValue = snapshot.accountAmounts?.[String(account.id)] ?? holdingValue;
@@ -298,7 +312,7 @@ export default function Home() {
       });
       return grouped;
     };
-  }, [accounts, coinHoldings, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings]);
+  }, [portfolioAccounts, coinHoldings, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings]);
   const assetDetailsByType = useMemo(() => {
     const details = {} as Record<AssetType, { accounts: Map<number, number>; holdings: Array<{ account: Account; holding: Holding; value: number }> }>;
     (Object.keys(assetTypeMeta) as AssetType[]).forEach(type => { details[type] = { accounts: new Map(), holdings: [] }; });
@@ -313,7 +327,7 @@ export default function Home() {
       items.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate });
       positionsByAccount.set(holding.accountId, items);
     }));
-    accounts.forEach(account => {
+    portfolioAccounts.forEach(account => {
       const positions = positionsByAccount.get(account.id) ?? [];
       const positionsTotal = positions.reduce((sum, item) => sum + item.value, 0);
       if (!positionsTotal) { details[assetTypeFor(account.type)].accounts.set(account.id, account.amount); return; }
@@ -326,7 +340,7 @@ export default function Home() {
       });
     });
     return details;
-  }, [accounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+  }, [portfolioAccounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
   const selectedAssetDetails = selectedAssetType ? assetDetailsByType[selectedAssetType] : null;
   const domesticTopThree = useMemo(() => {
     const grouped = new Map<string, { name: string; symbol: string; value: number; cost: number; quantity: number; accountNames: Set<string> }>();
@@ -350,20 +364,25 @@ export default function Home() {
     const startDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(start);
     return snapshots.filter(snapshot => snapshot.date >= startDate);
   }, [period, snapshots]);
+  const portfolioPeriodSnapshots = useMemo(() => periodSnapshots.map(snapshot => {
+    const amount = portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountAmounts?.[String(account.id)] ?? 0), 0);
+    const cost = portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0);
+    return { ...snapshot, total: amount, cost };
+  }), [periodSnapshots, portfolioAccounts]);
   const trendItems = useMemo(() => [
-    ...accounts.filter(account => account.amount > 0).map(account => ({
+    ...portfolioAccounts.filter(account => account.amount > 0).map(account => ({
       id: `account-${account.id}`,
       name: accountLabel(account.name),
       color: colorHex[account.color] ?? "#5666df",
       subtitle: account.broker,
       iconLabel: account.type.slice(0, 1),
       currentCost: currentAccountCosts[String(account.id)],
-      snapshots: periodSnapshots.flatMap(snapshot => {
+      snapshots: portfolioPeriodSnapshots.flatMap(snapshot => {
         const amount = snapshot.accountAmounts?.[String(account.id)];
         return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.accountCosts?.[String(account.id)] }] : [];
       }),
     })),
-  ], [accounts, currentAccountCosts, periodSnapshots]);
+  ], [portfolioAccounts, currentAccountCosts, portfolioPeriodSnapshots]);
   const toggleTrendItem = (id: string) => setSelectedTrendItems(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   const assetTrendItems = useMemo(() => [
     ...assetAllocationByType.map(asset => ({
@@ -380,8 +399,8 @@ export default function Home() {
     })),
   ], [assetAllocationByType, assetCostsForSnapshot, currentAssetCosts, periodSnapshots]);
   const toggleAssetTrendItem = (id: string) => setSelectedAssetTrendItems(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
-  const aggregateAccountTrend: TrendSeries = { id: "accounts-total", name: "전체 계좌 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: periodSnapshots };
-  const aggregateAssetTrend: TrendSeries = { id: "assets-total", name: "전체 자산 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: periodSnapshots };
+  const aggregateAccountTrend: TrendSeries = { id: "accounts-total", name: "전체 계좌 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: portfolioPeriodSnapshots };
+  const aggregateAssetTrend: TrendSeries = { id: "assets-total", name: "전체 자산 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: portfolioPeriodSnapshots };
 
   const updateStockAccounts = (type: string, next: Holding[], exchangeRate = 1) => setAccounts(current => current.map(account => {
     if (account.type !== type) return account;
@@ -442,10 +461,11 @@ export default function Home() {
     let mounted = true;
     void fetch("/api/portfolio").then(async response => {
       if (!response.ok) throw new Error("저장소 조회 실패");
-      return response.json() as Promise<{ hasData?: boolean; state?: { accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; profitPeaks?: Record<string, ProfitPeak>; irpResetVersion?: number; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
+      return response.json() as Promise<{ hasData?: boolean; state?: { portfolios?: Portfolio[]; accounts?: Account[]; imports?: ScreenshotImport[]; snapshots?: Snapshot[]; profitPeaks?: Record<string, ProfitPeak>; irpResetVersion?: number; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[] } }>;
     }).then(data => {
       if (!mounted || !data.hasData || !data.state) return;
-          if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
+      if (Array.isArray(data.state.portfolios) && data.state.portfolios.length) setPortfolios(data.state.portfolios.filter(item => typeof item?.id === "string" && typeof item?.name === "string"));
+      if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
       if (Array.isArray(data.state.imports)) setImports(data.state.imports);
       if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number"));
       if (data.state.profitPeaks && typeof data.state.profitPeaks === "object") setProfitPeaks(data.state.profitPeaks);
@@ -497,9 +517,9 @@ export default function Home() {
   }, [hydrated, domesticTopThree]);
   useEffect(() => {
     if (!hydrated) return;
-    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ accounts, imports, snapshots, profitPeaks, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
+    const timer = window.setTimeout(() => { void fetch("/api/portfolio", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ portfolios, accounts, imports, snapshots, profitPeaks, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings }) }).then(response => { if (!response.ok) throw new Error("저장 실패"); syncErrorShown.current = false; }).catch(() => { if (!syncErrorShown.current) { syncErrorShown.current = true; setNotice("변경 내용을 서버에 저장하지 못했습니다. 잠시 후 다시 시도해 주세요."); } }); }, 350);
     return () => window.clearTimeout(timer);
-  }, [accounts, imports, snapshots, profitPeaks, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
+  }, [portfolios, accounts, imports, snapshots, profitPeaks, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
   const detailsFor = (account: Account) => {
     if (account.type === "미국 주식") return { positions: usdHoldings.filter(item => item.accountId === account.id), updatedAt: usdQuoteUpdatedAt, exchangeRate: usdKrwRate, refresh: refreshUsdPrices };
     if (account.type === "펀드") return { positions: fundHoldings.filter(item => item.accountId === account.id), updatedAt: "", exchangeRate: 1, refresh: async () => undefined };
@@ -510,10 +530,10 @@ export default function Home() {
     return { positions: irpHoldings.filter(item => item.accountId === account.id), updatedAt: irpQuoteUpdatedAt, exchangeRate: 1, refresh: refreshIrpPrices };
   };
   return <main>
-    <header className="topbar"><div className="brand"><span className="brand-mark">P</span><span>포트폴리오</span></div><div className="topbar-actions"><span className="sync-dot" /> 아직 동기화된 계좌 없음 <button className="profile">SB</button></div></header>
-    <section className="hero"><div><p className="eyebrow">ALL ACCOUNTS · KRW</p><h1>내 자산, 한눈에.</h1><p className="hero-copy">증권사별 계좌와 연금·펀드·코인을 한곳에 모아 성과를 확인하세요.</p></div></section>
+    <header className="topbar"><div className="brand"><span className="brand-mark">P</span><span>포트폴리오</span></div><div className="topbar-actions"><label className="portfolio-select"><span>포트폴리오</span><select value={activePortfolio?.id ?? ""} onChange={event => { setActivePortfolioId(event.target.value); setExpandedAccountId(null); setSelectedTrendItems([]); setSelectedAssetTrendItems([]); setSelectedAssetType(null); }} aria-label="표시할 포트폴리오 선택">{portfolios.map(portfolio => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}</select></label><button className="profile">{activePortfolio?.name.slice(-2) ?? "SB"}</button></div></header>
+    <section className="hero"><div><p className="eyebrow">{activePortfolio?.name ?? "포트폴리오"} · KRW</p><h1>{activePortfolio?.name ?? "내"} 자산, 한눈에.</h1><p className="hero-copy">이 포트폴리오에 연결된 계좌와 연금·펀드·코인의 성과를 확인하세요.</p></div></section>
     {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>닫기</button></div>}
-    <section className="metrics"><article className="metric-card main-metric"><p>통합 평가자산</p><strong>{won.format(total)}</strong><span>등록된 보유 종목 기준</span></article><article className="metric-card"><p>통합 수익률</p><strong>{total > 0 ? percent(weightedReturn) : "-"}</strong><span>매입금액 대비</span></article><article className="metric-card"><p>운용 계좌</p><strong>{accounts.filter(account => account.amount > 0).length}<small>개</small></strong><span>등록 가능한 7개 자산 유형</span></article><article className="metric-card"><p>수익금</p><strong className={totalProfit >= 0 ? "positive" : "negative"}>{total > 0 ? `${totalProfit >= 0 ? "+" : ""}${won.format(totalProfit)}` : "-"}</strong><span>매입금액 대비 평가손익</span></article></section>
+    <section className="metrics"><article className="metric-card main-metric"><p>통합 평가자산</p><strong>{won.format(total)}</strong><span>등록된 보유 종목 기준</span></article><article className="metric-card"><p>통합 수익률</p><strong>{total > 0 ? percent(weightedReturn) : "-"}</strong><span>매입금액 대비</span></article><article className="metric-card"><p>운용 계좌</p><strong>{portfolioAccounts.filter(account => account.amount > 0).length}<small>개</small></strong><span>{activePortfolio?.name ?? "선택"} 포트폴리오</span></article><article className="metric-card"><p>수익금</p><strong className={totalProfit >= 0 ? "positive" : "negative"}>{total > 0 ? `${totalProfit >= 0 ? "+" : ""}${won.format(totalProfit)}` : "-"}</strong><span>매입금액 대비 평가손익</span></article></section>
     <PerformancePanel title="통합 자산 추이" period={period} onPeriodChange={setPeriod} items={trendItems} aggregateSeries={aggregateAccountTrend} selectedItems={selectedTrendItems} onToggleItem={toggleTrendItem} collapsed={portfolioTrendCollapsed} onToggleCollapsed={() => setPortfolioTrendCollapsed(current => !current)} pickerLabel="그래프에 표시할 계좌" pickerMode="below" />
     <PerformancePanel title="자산 유형별 추이" period={period} onPeriodChange={setPeriod} items={assetTrendItems} aggregateSeries={aggregateAssetTrend} selectedItems={selectedAssetTrendItems} onToggleItem={toggleAssetTrendItem} collapsed={assetTrendCollapsed} onToggleCollapsed={() => setAssetTrendCollapsed(current => !current)} pickerLabel="그래프에 표시할 자산 유형" pickerMode="below" pickerColumnLabel="자산 유형" />
     <section className="panel asset-allocation-panel"><div className="panel-head"><div><p className="eyebrow">ASSET ALLOCATION</p><h2>자산 유형별 비중</h2></div></div><p className="account-hint">계좌가 아닌 보유 종목·상품의 성격을 기준으로 합산합니다. 유형을 클릭하면 계좌와 종목을 볼 수 있습니다.</p><div className="asset-allocation-body"><div className="donut" style={{ background: `conic-gradient(${assetAllocationGradient})` }}><div><strong>{assetAllocationByType.length}</strong><span>자산 유형</span></div></div><div className="legend asset-legend">{assetAllocationByType.map(item => <button key={item.type} className={selectedAssetType === item.type ? "selected" : ""} onClick={() => setSelectedAssetType(current => current === item.type ? null : item.type)} aria-expanded={selectedAssetType === item.type}><i className={item.color}/><span>{item.type}</span><b>{total > 0 ? (item.amount / total * 100).toFixed(1) : "0.0"}%</b><small>›</small></button>)}</div></div>{selectedAssetType && selectedAssetDetails && <div className="asset-detail"><div className="asset-detail-head"><div><p className="eyebrow">{selectedAssetType.toUpperCase()}</p><h3>{selectedAssetType} 상세</h3></div><button onClick={() => setSelectedAssetType(null)}>닫기</button></div><div className="asset-detail-grid"><div><h4>포함 계좌</h4><div className="asset-detail-list asset-metric-list"><div className="asset-metric-heading"><span>계좌</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{[...selectedAssetDetails.accounts.entries()].sort((a, b) => b[1] - a[1]).map(([accountId, amount]) => { const account = accounts.find(item => item.id === accountId); if (!account) return null; const profit = account.returnRate > -100 ? amount - amount / (1 + account.returnRate / 100) : 0; return <div className="asset-metric-row" key={accountId}><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span><strong>{won.format(amount)}</strong><strong className={account.returnRate >= 0 ? "positive" : "negative"}>{percent(account.returnRate)}</strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><strong>{total > 0 ? (amount / total * 100).toFixed(1) : "0.0"}%</strong></div>; })}</div></div><div><h4>보유 종목</h4><div className="asset-detail-list asset-metric-list">{selectedAssetDetails.holdings.length ? <><div className="asset-metric-heading"><span>종목</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{[...selectedAssetDetails.holdings].sort((a, b) => b.value - a.value).map(({ account, holding, value }) => { const cost = holding.fallbackPrice > 0 ? value * holding.averagePrice / holding.fallbackPrice : 0; const profit = value - cost; const rate = cost > 0 ? (value / cost - 1) * 100 : 0; return <div className="asset-metric-row" key={`${account.id}-${holding.symbol}-${holding.name}`}><span><b>{holding.name}</b><small>{accountLabel(account.name)} · {holding.symbol}</small></span><strong>{won.format(value)}</strong><strong className={rate >= 0 ? "positive" : "negative"}>{percent(rate)}</strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><strong>{total > 0 ? (value / total * 100).toFixed(1) : "0.0"}%</strong></div>; })}</> : <p className="asset-empty">등록된 종목 정보가 없습니다.</p>}</div></div></div></div>}</section>
