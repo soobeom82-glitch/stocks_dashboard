@@ -45,6 +45,13 @@ const seohaOverseasHoldings: Holding[] = [
   ["TSLA", "테슬라", 1, 198.09, 333.9], ["VOO", "뱅가드 S&P 500 인덱스 ETF", 9, 262.68, 6321.45],
   ["VT", "뱅가드 글로벌 주식 인덱스 ETF", 5, 80.0329, 797.72], ["XLY", "SPDR 임의 소비재 ETF", 50, 57.4, 5797.85],
 ].map(([symbol, name, quantity, averagePrice, value]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(value) / Number(quantity), accountId: 10 }));
+const eunhoPensionAccount: Account = { id: 11, type: "연금저축", broker: "대신증권", name: "연금저축 계좌", amount: 39470978, returnRate: 31.67, color: "pink", portfolioId: "kim-eunho" };
+const eunhoPensionHoldings: Holding[] = [
+  ["284430.KS", "KODEX 200미국채혼합50", 1019, 17010, 20751672],
+  ["367380.KS", "RISE 미국나스닥100", 378, 13895, 11436462],
+  ["379780.KS", "RISE 미국S&P500", 17, 21538, 395234],
+  ["411060.KS", "ACE KRX금현물", 237, 28585, 6457335],
+].map(([symbol, name, quantity, averagePrice, value]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(value) / Number(quantity), accountId: 11 } as Holding)).concat({ symbol: "CASH-KRW", name: "예수금", quantity: 1, averagePrice: 430275, fallbackPrice: 430275, accountId: 11, unit: "원" });
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -505,6 +512,8 @@ export default function Home() {
       else setPensionHoldings(current => current.map(holding => holding.accountId === seohaPensionAccount.id && holding.symbol === "RISE-US-SP500" ? { ...holding, symbol: "379780.KS" } : holding));
       if (!data.state.accounts?.some(account => account.id === seohaOverseasAccount.id)) setAccounts(current => [...current, seohaOverseasAccount]);
       if (!data.state.usdHoldings?.some(holding => holding.accountId === seohaOverseasAccount.id)) setUsdHoldings(current => [...current, ...seohaOverseasHoldings]);
+      if (!data.state.accounts?.some(account => account.id === eunhoPensionAccount.id)) setAccounts(current => [...current, eunhoPensionAccount]);
+      if (!data.state.pensionHoldings?.some(holding => holding.accountId === eunhoPensionAccount.id)) setPensionHoldings(current => [...current, ...eunhoPensionHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
