@@ -1,9 +1,10 @@
 type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string; marketPrice?: number };
 type Account = { id: number; type: string; amount: number; returnRate: number };
 type ProfitPeak = { profit: number; date: string };
-type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; accountAmounts?: Record<string, number>; assetAmounts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
+type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; accountAmounts?: Record<string, number>; assetAmounts?: Record<string, number>; holdingAmounts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
+const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name ?? ""}`;
 
 async function quote(symbol: string): Promise<number | null> {
   const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`, { headers: { "User-Agent": "PortfolioDashboard/1.0" }, next: { revalidate: 21600 } });
@@ -83,6 +84,16 @@ function computeAssetAmounts(accounts: Account[], sources: Array<{ holdings: Hol
   return amounts;
 }
 
+function computeHoldingAmounts(sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
+  const amounts: Record<string, number> = {};
+  sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
+    if (!holding.accountId) return;
+    const key = holdingSnapshotKey(holding.accountId, holding);
+    amounts[key] = (amounts[key] ?? 0) + holding.quantity * holding.fallbackPrice * exchangeRate;
+  }));
+  return amounts;
+}
+
 function updateProfitPeaks(state: PortfolioState, accounts: Account[], groups: Array<{ type: string; holdings: Holding[] }>, date: string) {
   const profits = new Map<string, number>();
   groups.forEach(({ type, holdings }) => holdings.forEach(holding => {
@@ -123,11 +134,13 @@ export async function saveDailyPortfolioSnapshot() {
   const total = accounts.reduce((sum, account) => sum + account.amount, 0);
   const date = KST_DATE();
   const accountAmounts = Object.fromEntries(accounts.map(account => [String(account.id), account.amount]));
-  const assetAmounts = computeAssetAmounts(accounts, [
+  const holdingSources = [
     { holdings: domestic.holdings }, { holdings: usd.holdings, exchangeRate: usdKrw }, { holdings: state.fundHoldings ?? [] },
     { holdings: coins }, { holdings: pension.holdings }, { holdings: isa.holdings }, { holdings: irp },
-  ]);
-  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, accountAmounts, assetAmounts }].sort((a, b) => a.date.localeCompare(b.date));
+  ];
+  const assetAmounts = computeAssetAmounts(accounts, holdingSources);
+  const holdingAmounts = computeHoldingAmounts(holdingSources);
+  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, accountAmounts, assetAmounts, holdingAmounts }].sort((a, b) => a.date.localeCompare(b.date));
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: irp }], date);
   const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks });
   await saveDashboardState(payload);
