@@ -32,7 +32,7 @@ const initialPortfolios: Portfolio[] = [
 ];
 const seohaPensionAccount: Account = { id: 9, type: "연금저축", broker: "대신증권", name: "연금저축 계좌", amount: 429371, returnRate: 7.86, color: "pink", portfolioId: "kim-seoha" };
 const seohaPensionHoldings: Holding[] = [
-  { symbol: "RISE-US-SP500", name: "RISE 미국S&P500", quantity: 16, averagePrice: 21578, fallbackPrice: 23224.125, accountId: 9 },
+  { symbol: "379780.KS", name: "RISE 미국S&P500", quantity: 16, averagePrice: 21578, fallbackPrice: 23224.125, accountId: 9 },
   { symbol: "CASH-KRW", name: "예수금", quantity: 1, averagePrice: 57785, fallbackPrice: 57785, accountId: 9, unit: "원" },
 ];
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
@@ -492,6 +492,7 @@ export default function Home() {
       if (Array.isArray(data.state.irpHoldings)) setIrpHoldings(data.state.irpHoldings.map(item => ({ ...item, accountId: item.accountId ?? 4 })));
       if (!data.state.accounts?.some(account => account.id === seohaPensionAccount.id)) setAccounts(current => [...current, seohaPensionAccount]);
       if (!data.state.pensionHoldings?.some(holding => holding.accountId === seohaPensionAccount.id)) setPensionHoldings(current => [...current, ...seohaPensionHoldings]);
+      else setPensionHoldings(current => current.map(holding => holding.accountId === seohaPensionAccount.id && holding.symbol === "RISE-US-SP500" ? { ...holding, symbol: "379780.KS" } : holding));
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
