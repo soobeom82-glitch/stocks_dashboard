@@ -122,11 +122,21 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
     ...positions.map((holding, index) => ({ id: `holding-${account.id}-${index}-${holding.symbol}`, name: holding.name, color: ["#5666df", "#f5a641", "#3fb99e", "#e878a9", "#8d71e8", "#ecc950"][index % 6], currentCost: holding.quantity * holding.averagePrice * (isUsd ? exchangeRate : 1), snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.holdingAmounts?.[holdingSnapshotKey(account.id, holding)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.holdingCosts?.[holdingSnapshotKey(account.id, holding)] }] : []; }) })),
   ];
   const visibleHoldingTrendItems = holdingTrendItems.filter(item => selectedTrendItems.includes(item.id));
+  const irpRiskyAmount = isIrp ? positions.filter(holding => holding.assetClass === "ETF·주식").reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0) : 0;
+  const irpRiskyRate = account.amount > 0 ? irpRiskyAmount / account.amount * 100 : 0;
+  const contributionLimits = account.type === "ISA"
+    ? [{ label: "연간 납입 한도", value: "2,000만원" }, { label: "총 납입 한도", value: "1억원 · 미사용 한도 이월" }]
+    : account.type === "연금저축"
+      ? [{ label: "연금계좌 합산 납입 한도", value: "연 1,800만원" }, { label: "연금저축 세액공제", value: "연 600만원 · IRP 합산 900만원" }]
+      : isIrp
+        ? [{ label: "연금계좌 합산 납입 한도", value: "연 1,800만원" }, { label: "세액공제 한도", value: "연금저축·IRP 합산 연 900만원" }]
+        : [];
 
   if (!isUsd && !isCoin && !isFund && !isKrwStock && !isIrp) return <div className="account-expanded empty-account-detail">등록된 보유자산이 없습니다.</div>;
   return <div className="account-expanded">
     <div className="detail-head"><div><p className="eyebrow">{label}</p><h3>{title}</h3></div>{!isFund && <button className="text-button" onClick={event => { event.stopPropagation(); void refresh(); }}>현재가 새로고침 {updatedAt && `· ${updatedAt}`}</button>}</div>
     <p className="holdings-note">{note}</p>
+    {(isIrp || contributionLimits.length > 0) && <section className="account-limit-summary"><div className="limit-summary-head"><p className="eyebrow">ACCOUNT LIMITS</p><span>2026년 기준</span></div><div className="limit-summary-grid">{isIrp && <div className="limit-metric"><span>위험자산 비중</span><strong className={irpRiskyRate <= 70 ? "limit-ok" : "limit-alert"}>{irpRiskyRate.toFixed(1)}% <small>/ 70.0%</small></strong><small>ETF·주식 {won.format(irpRiskyAmount)}</small></div>}{contributionLimits.map(item => <div className="limit-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div><p>납입 잔여 한도는 납입 내역을 등록하면 계산해 표시합니다.</p></section>}
     <section className="account-holding-trend"><div className="detail-head"><div><p className="eyebrow">HOLDING PERFORMANCE</p><h4>보유 종목 추이</h4></div></div><div className="trend-item-picker" aria-label={`${account.name} 보유 종목 그래프 표시 항목`}>{holdingTrendItems.map(item => <button key={item.id} className={selectedTrendItems.includes(item.id) ? "selected" : ""} onClick={event => { event.stopPropagation(); onToggleTrendItem(item.id); }} aria-pressed={selectedTrendItems.includes(item.id)}><i style={{ background: item.color }} />{item.name}</button>)}</div><div className="trend-series-list">{visibleHoldingTrendItems.length ? <TrendChart series={visibleHoldingTrendItems} /> : <div className="empty-holdings">그래프로 볼 보유 종목을 하나 이상 선택해 주세요.</div>}</div></section>
     {positions.length === 0 ? <div className="empty-holdings">등록된 {isCoin ? "코인 보유자산" : "보유 종목"}이 없습니다.</div> : groups.map(group => <div className="holding-group" key={group.assetClass}>{isIrp && <h4>{group.assetClass}</h4>}<div className="holding-table"><div><span>{isCoin ? "코인" : isIrp ? "상품" : "종목"}</span><span>보유 수량</span><span>매입금액</span><span>평가금액</span><span>평가손익</span><span>수익률</span></div>{group.positions.map(holding => {
       const multiplier = isUsd ? exchangeRate : 1;
