@@ -275,6 +275,22 @@ export default function Home() {
     });
     return grouped;
   }, [accounts, coinHoldings, currentAccountCosts, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings, usdKrwRate]);
+  const assetCostsForSnapshot = useMemo(() => {
+    const holdingsByKey = new Map<string, Holding>();
+    const sources: Array<Holding[]> = [holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings];
+    sources.flat().forEach(holding => { if (holding.accountId) holdingsByKey.set(holdingSnapshotKey(holding.accountId, holding), holding); });
+    return (snapshot: Snapshot) => {
+      const grouped: Record<AssetType, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
+      accounts.forEach(account => {
+        const entries = [...holdingsByKey.entries()].filter(([key]) => key.startsWith(`${account.id}:`)).map(([key, holding]) => ({ holding, value: snapshot.holdingAmounts?.[key] ?? 0, cost: snapshot.holdingCosts?.[key] ?? 0 }));
+        const holdingValue = entries.reduce((sum, item) => sum + item.value, 0);
+        const accountValue = snapshot.accountAmounts?.[String(account.id)] ?? holdingValue;
+        if (!holdingValue) { grouped[assetTypeFor(account.type)] += snapshot.accountCosts?.[String(account.id)] ?? 0; return; }
+        entries.forEach(item => { grouped[assetTypeFor(account.type, item.holding)] += item.cost * accountValue / holdingValue; });
+      });
+      return grouped;
+    };
+  }, [accounts, coinHoldings, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings]);
   const assetDetailsByType = useMemo(() => {
     const details = {} as Record<AssetType, { accounts: Map<number, number>; holdings: Array<{ account: Account; holding: Holding; value: number }> }>;
     (Object.keys(assetTypeMeta) as AssetType[]).forEach(type => { details[type] = { accounts: new Map(), holdings: [] }; });
@@ -350,10 +366,11 @@ export default function Home() {
       snapshots: periodSnapshots.flatMap((snapshot, index) => {
         const amount = snapshot.assetAmounts?.[asset.type];
         const isLatest = index === periodSnapshots.length - 1;
-        return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: isLatest ? currentAssetCosts[asset.type] : snapshot.assetCosts?.[asset.type] }] : [];
+        const historicalCost = assetCostsForSnapshot(snapshot)[asset.type] || snapshot.assetCosts?.[asset.type];
+        return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: isLatest ? currentAssetCosts[asset.type] : historicalCost }] : [];
       }),
     })),
-  ], [assetAllocationByType, currentAssetCosts, periodSnapshots]);
+  ], [assetAllocationByType, assetCostsForSnapshot, currentAssetCosts, periodSnapshots]);
   const toggleAssetTrendItem = (id: string) => setSelectedAssetTrendItems(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   const aggregateAccountTrend: TrendSeries = { id: "accounts-total", name: "전체 계좌 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: periodSnapshots };
   const aggregateAssetTrend: TrendSeries = { id: "assets-total", name: "전체 자산 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: periodSnapshots };
