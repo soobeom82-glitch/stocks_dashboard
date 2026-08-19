@@ -1,7 +1,7 @@
 type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string; marketPrice?: number };
 type Account = { id: number; type: string; amount: number; returnRate: number };
 type ProfitPeak = { profit: number; date: string };
-type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; accountAmounts?: Record<string, number>; assetAmounts?: Record<string, number>; holdingAmounts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
+type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name ?? ""}`;
@@ -94,6 +94,35 @@ function computeHoldingAmounts(sources: Array<{ holdings: Holding[]; exchangeRat
   return amounts;
 }
 
+function computeHoldingCosts(sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
+  const costs: Record<string, number> = {};
+  sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
+    if (!holding.accountId) return;
+    const key = holdingSnapshotKey(holding.accountId, holding);
+    costs[key] = (costs[key] ?? 0) + holding.quantity * holding.averagePrice * exchangeRate;
+  }));
+  return costs;
+}
+
+function computeAssetCosts(accounts: Account[], sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
+  const costs: Record<string, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
+  const positionsByAccount = new Map<number, Array<{ holding: Holding; value: number; cost: number }>>();
+  sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
+    if (!holding.accountId) return;
+    const positions = positionsByAccount.get(holding.accountId) ?? [];
+    positions.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate, cost: holding.quantity * holding.averagePrice * exchangeRate });
+    positionsByAccount.set(holding.accountId, positions);
+  }));
+  accounts.forEach(account => {
+    const positions = positionsByAccount.get(account.id) ?? [];
+    const positionsTotal = positions.reduce((sum, position) => sum + position.value, 0);
+    const accountCost = account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
+    if (!positionsTotal) { costs[assetTypeFor(account.type)] += accountCost; return; }
+    positions.forEach(position => { costs[assetTypeFor(account.type, position.holding)] += accountCost * position.value / positionsTotal; });
+  });
+  return costs;
+}
+
 function updateProfitPeaks(state: PortfolioState, accounts: Account[], groups: Array<{ type: string; holdings: Holding[] }>, date: string) {
   const profits = new Map<string, number>();
   groups.forEach(({ type, holdings }) => holdings.forEach(holding => {
@@ -132,6 +161,7 @@ export async function saveDailyPortfolioSnapshot() {
   accounts = accountPerformance(accounts, "코인", coins);
   accounts = accountPerformance(accounts, "IRP", irp);
   const total = accounts.reduce((sum, account) => sum + account.amount, 0);
+  const cost = accounts.reduce((sum, account) => sum + (account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0), 0);
   const date = KST_DATE();
   const accountAmounts = Object.fromEntries(accounts.map(account => [String(account.id), account.amount]));
   const holdingSources = [
@@ -140,7 +170,10 @@ export async function saveDailyPortfolioSnapshot() {
   ];
   const assetAmounts = computeAssetAmounts(accounts, holdingSources);
   const holdingAmounts = computeHoldingAmounts(holdingSources);
-  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, accountAmounts, assetAmounts, holdingAmounts }].sort((a, b) => a.date.localeCompare(b.date));
+  const accountCosts = Object.fromEntries(accounts.map(account => [String(account.id), account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0]));
+  const assetCosts = computeAssetCosts(accounts, holdingSources);
+  const holdingCosts = computeHoldingCosts(holdingSources);
+  const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, cost, accountAmounts, accountCosts, assetAmounts, assetCosts, holdingAmounts, holdingCosts }].sort((a, b) => a.date.localeCompare(b.date));
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: irp }], date);
   const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks });
   await saveDashboardState(payload);

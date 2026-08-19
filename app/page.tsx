@@ -11,7 +11,7 @@ import "./trend.css";
 type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string };
 type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
-type Snapshot = { date: string; total: number; accountAmounts?: Record<string, number>; assetAmounts?: Partial<Record<AssetType, number>>; holdingAmounts?: Record<string, number> };
+type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Partial<Record<AssetType, number>>; assetCosts?: Partial<Record<AssetType, number>>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
 type ProfitPeak = { profit: number; date: string };
 type AssetType = "국내 주식" | "해외 주식" | "채권·현금성" | "대체자산" | "펀드" | "가상자산";
 
@@ -68,18 +68,18 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => accountProfile[account.id] ? { ...account, ...accountProfile[account.id] } : account);
 const todayKst = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 
-type TrendSeries = { id: string; name: string; color: string; snapshots: Snapshot[] };
+type TrendSeries = { id: string; name: string; color: string; snapshots: Snapshot[]; currentCost?: number };
 function TrendChart({ series }: { series: TrendSeries[] }) {
-  const drawableSeries = series.filter(item => item.snapshots.length > 1).map(item => ({ ...item, base: item.snapshots[0].total, returns: item.snapshots.map(snapshot => (snapshot.total / item.snapshots[0].total - 1) * 100) }));
+  const costOf = (item: TrendSeries, snapshot: Snapshot) => snapshot.cost ?? item.currentCost ?? 0;
+  const drawableSeries = series.filter(item => item.snapshots.length > 1 && item.snapshots.every(snapshot => costOf(item, snapshot) > 0)).map(item => ({ ...item, returns: item.snapshots.map(snapshot => (snapshot.total / costOf(item, snapshot) - 1) * 100), profits: item.snapshots.map(snapshot => snapshot.total - costOf(item, snapshot)) }));
   if (!drawableSeries.length) return <div className="chart empty-chart">비교 기준 생성 중입니다. 선택한 항목의 일별 스냅샷이 2개 쌓이면 추이가 표시됩니다.</div>;
   const axisRate = Math.max(...drawableSeries.flatMap(item => item.returns.map(value => Math.abs(value))), 0.1) * 1.15;
-  const profitBase = drawableSeries.some(item => item.id === "total") ? drawableSeries.find(item => item.id === "total")!.base : drawableSeries.reduce((sum, item) => sum + item.base, 0);
-  const axisProfit = profitBase * axisRate / 100;
+  const axisProfit = Math.max(...drawableSeries.flatMap(item => item.profits.map(value => Math.abs(value))), 1) * 1.15;
   const rateLabel = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
   const profitLabel = (value: number) => `${value >= 0 ? "+" : ""}${won.format(value)}`;
   const firstDate = drawableSeries[0].snapshots[0].date;
   const lastDate = drawableSeries[0].snapshots.at(-1)!.date;
-  return <><div className="trend-line-legend">{series.map(item => { const first = item.snapshots[0]; const last = item.snapshots.at(-1); const change = item.snapshots.length > 1 && first && last ? (last.total / first.total - 1) * 100 : null; const profit = item.snapshots.length > 1 && first && last ? last.total - first.total : null; const tone = change === null ? "" : change >= 0 ? "positive" : "negative"; return <span key={item.id}><i style={{ background: item.color }} />{item.name}<strong className={tone}>{change === null || profit === null ? "기준 생성 중" : <>{percent(change)}<small>{profit >= 0 ? "+" : ""}{won.format(profit)}</small></>}</strong></span>; })}</div><div className="trend-chart"><div className="trend-axis trend-rate-axis" aria-label="수익률 축"><span>{rateLabel(axisRate)}</span><span>0.00%</span><span>{rateLabel(-axisRate)}</span></div><div className="trend-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="선택 자산 수익률 추이">{drawableSeries.map(item => { const points = item.returns.map((rate, index) => `${index / (item.returns.length - 1) * 100},${50 - rate / axisRate * 40}`).join(" "); return <polyline key={item.id} points={points} fill="none" stroke={item.color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />; })}</svg></div><div className="trend-axis trend-profit-axis" aria-label="수익금 축"><span>{profitLabel(axisProfit)}</span><span>0</span><span>{profitLabel(-axisProfit)}</span></div><div className="trend-labels"><span>{firstDate.slice(5).replace("-", ".")}</span><span>{lastDate.slice(5).replace("-", ".")}</span></div></div></>;
+  return <><div className="trend-line-legend">{series.map(item => { const last = item.snapshots.at(-1); const cost = last ? costOf(item, last) : 0; const rate = last && cost > 0 ? (last.total / cost - 1) * 100 : null; const profit = last && cost > 0 ? last.total - cost : null; const tone = rate === null ? "" : rate >= 0 ? "positive" : "negative"; return <span key={item.id}><i style={{ background: item.color }} />{item.name}<strong className={tone}>{rate === null || profit === null ? "기준 생성 중" : <>{percent(rate)}<small>{profit >= 0 ? "+" : ""}{won.format(profit)}</small></>}</strong></span>; })}</div><div className="trend-chart"><div className="trend-axis trend-rate-axis" aria-label="수익률 축"><span>{rateLabel(axisRate)}</span><span>0.00%</span><span>{rateLabel(-axisRate)}</span></div><div className="trend-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="선택 자산 수익률 추이">{drawableSeries.map(item => { const points = item.returns.map((rate, index) => `${index / (item.returns.length - 1) * 100},${50 - rate / axisRate * 40}`).join(" "); return <polyline key={item.id} points={points} fill="none" stroke={item.color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />; })}</svg></div><div className="trend-axis trend-profit-axis" aria-label="평가손익 축"><span>{profitLabel(axisProfit)}</span><span>0</span><span>{profitLabel(-axisProfit)}</span></div><div className="trend-labels"><span>{firstDate.slice(5).replace("-", ".")}</span><span>{lastDate.slice(5).replace("-", ".")}</span></div></div></>;
 }
 // 사용자가 제공한 미국 주식 잔고 화면의 수량·달러 평단가입니다. 현재가는 조회 시 갱신됩니다.
 const importedUsdHoldings: Holding[] = [
@@ -118,8 +118,8 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
     : "상장 ETF·주식은 현재가를 표시하고, 예금·보험·디폴트옵션은 마지막 등록 평가금액을 유지합니다.";
   const accountTrendId = `account-total-${account.id}`;
   const holdingTrendItems: TrendSeries[] = [
-    { id: accountTrendId, name: "계좌 합산", color: colorHex[account.color] ?? "#5666df", snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.accountAmounts?.[String(account.id)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount }] : []; }) },
-    ...positions.map((holding, index) => ({ id: `holding-${account.id}-${index}-${holding.symbol}`, name: holding.name, color: ["#5666df", "#f5a641", "#3fb99e", "#e878a9", "#8d71e8", "#ecc950"][index % 6], snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.holdingAmounts?.[holdingSnapshotKey(account.id, holding)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount }] : []; }) })),
+    { id: accountTrendId, name: "계좌 합산", color: colorHex[account.color] ?? "#5666df", currentCost: account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0, snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.accountAmounts?.[String(account.id)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.accountCosts?.[String(account.id)] }] : []; }) },
+    ...positions.map((holding, index) => ({ id: `holding-${account.id}-${index}-${holding.symbol}`, name: holding.name, color: ["#5666df", "#f5a641", "#3fb99e", "#e878a9", "#8d71e8", "#ecc950"][index % 6], currentCost: holding.quantity * holding.averagePrice * (isUsd ? exchangeRate : 1), snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.holdingAmounts?.[holdingSnapshotKey(account.id, holding)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.holdingCosts?.[holdingSnapshotKey(account.id, holding)] }] : []; }) })),
   ];
   const visibleHoldingTrendItems = holdingTrendItems.filter(item => selectedTrendItems.includes(item.id));
 
@@ -216,6 +216,21 @@ export default function Home() {
     }));
     return amounts;
   }, [holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+  const currentHoldingCosts = useMemo(() => {
+    const costs: Record<string, number> = {};
+    const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
+      { positions: holdings, exchangeRate: 1 }, { positions: usdHoldings, exchangeRate: usdKrwRate }, { positions: fundHoldings, exchangeRate: 1 },
+      { positions: coinHoldings, exchangeRate: 1 }, { positions: pensionHoldings, exchangeRate: 1 }, { positions: isaHoldings, exchangeRate: 1 }, { positions: irpHoldings, exchangeRate: 1 },
+    ];
+    sources.forEach(({ positions, exchangeRate }) => positions.forEach(holding => {
+      if (!holding.accountId) return;
+      const key = holdingSnapshotKey(holding.accountId, holding);
+      costs[key] = (costs[key] ?? 0) + holding.quantity * holding.averagePrice * exchangeRate;
+    }));
+    return costs;
+  }, [holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+  const currentAccountCosts = useMemo(() => Object.fromEntries(accounts.map(account => [String(account.id), account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0])), [accounts]);
+  const currentAssetCosts = useMemo(() => Object.fromEntries(assetAllocationByType.map(asset => [asset.type, total > 0 ? asset.amount / total * (total - totalProfit) : 0])), [assetAllocationByType, total, totalProfit]);
   const assetDetailsByType = useMemo(() => {
     const details = {} as Record<AssetType, { accounts: Map<number, number>; holdings: Array<{ account: Account; holding: Holding; value: number }> }>;
     (Object.keys(assetTypeMeta) as AssetType[]).forEach(type => { details[type] = { accounts: new Map(), holdings: [] }; });
@@ -267,45 +282,50 @@ export default function Home() {
     const startDate = new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(start);
     return snapshots.filter(snapshot => snapshot.date >= startDate);
   }, [period, snapshots]);
-  const periodChange = useMemo(() => periodSnapshots.length > 1 ? (periodSnapshots.at(-1)!.total / periodSnapshots[0].total - 1) * 100 : null, [periodSnapshots]);
   const trendItems = useMemo(() => [
-    { id: "total", name: "전체 계좌 합산", color: "#5666df", snapshots: periodSnapshots },
+    { id: "total", name: "전체 계좌 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: periodSnapshots },
     ...accounts.filter(account => account.amount > 0).map(account => ({
       id: `account-${account.id}`,
       name: accountLabel(account.name),
       color: colorHex[account.color] ?? "#5666df",
+      currentCost: currentAccountCosts[String(account.id)],
       snapshots: periodSnapshots.flatMap(snapshot => {
         const amount = snapshot.accountAmounts?.[String(account.id)];
-        return typeof amount === "number" ? [{ date: snapshot.date, total: amount }] : [];
+        return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.accountCosts?.[String(account.id)] }] : [];
       }),
     })),
-  ], [accounts, periodSnapshots]);
+  ], [accounts, currentAccountCosts, periodSnapshots, total, totalProfit]);
   const visibleTrendItems = trendItems.filter(item => selectedTrendItems.includes(item.id));
   const reportChange = (() => {
-    if (selectedTrendItems.includes("total")) return periodChange;
-    if (visibleTrendItems.length !== 1 || visibleTrendItems[0].snapshots.length < 2) return null;
-    const values = visibleTrendItems[0].snapshots;
-    return (values.at(-1)!.total / values[0].total - 1) * 100;
+    if (selectedTrendItems.includes("total")) return weightedReturn;
+    if (visibleTrendItems.length !== 1) return null;
+    const item = visibleTrendItems[0];
+    const last = item.snapshots.at(-1);
+    const cost = last?.cost ?? item.currentCost ?? 0;
+    return last && cost > 0 ? (last.total / cost - 1) * 100 : null;
   })();
   const toggleTrendItem = (id: string) => setSelectedTrendItems(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   const assetTrendItems = useMemo(() => [
-    { id: "asset-total", name: "전체 자산 합산", color: "#5666df", snapshots: periodSnapshots },
+    { id: "asset-total", name: "전체 자산 합산", color: "#5666df", currentCost: total - totalProfit, snapshots: periodSnapshots },
     ...assetAllocationByType.map(asset => ({
       id: `asset-${asset.type}`,
       name: asset.type,
       color: colorHex[asset.color],
+      currentCost: currentAssetCosts[asset.type],
       snapshots: periodSnapshots.flatMap(snapshot => {
         const amount = snapshot.assetAmounts?.[asset.type];
-        return typeof amount === "number" ? [{ date: snapshot.date, total: amount }] : [];
+        return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.assetCosts?.[asset.type] }] : [];
       }),
     })),
-  ], [assetAllocationByType, periodSnapshots]);
+  ], [assetAllocationByType, currentAssetCosts, periodSnapshots, total, totalProfit]);
   const visibleAssetTrendItems = assetTrendItems.filter(item => selectedAssetTrendItems.includes(item.id));
   const assetReportChange = (() => {
-    if (selectedAssetTrendItems.includes("asset-total")) return periodChange;
-    if (visibleAssetTrendItems.length !== 1 || visibleAssetTrendItems[0].snapshots.length < 2) return null;
-    const values = visibleAssetTrendItems[0].snapshots;
-    return (values.at(-1)!.total / values[0].total - 1) * 100;
+    if (selectedAssetTrendItems.includes("asset-total")) return weightedReturn;
+    if (visibleAssetTrendItems.length !== 1) return null;
+    const item = visibleAssetTrendItems[0];
+    const last = item.snapshots.at(-1);
+    const cost = last?.cost ?? item.currentCost ?? 0;
+    return last && cost > 0 ? (last.total / cost - 1) * 100 : null;
   })();
   const toggleAssetTrendItem = (id: string) => setSelectedAssetTrendItems(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
 
@@ -401,12 +421,13 @@ export default function Home() {
     const date = todayKst();
     const accountAmounts = Object.fromEntries(accounts.map(account => [String(account.id), account.amount]));
     const assetAmounts = Object.fromEntries(assetAllocationByType.map(asset => [asset.type, asset.amount]));
+    const cost = total - totalProfit;
     setSnapshots(current => {
       const existing = current.find(snapshot => snapshot.date === date);
-      if (existing) return existing.accountAmounts && existing.assetAmounts && existing.holdingAmounts ? current : current.map(snapshot => snapshot.date === date ? { ...snapshot, accountAmounts, assetAmounts, holdingAmounts: currentHoldingAmounts } : snapshot);
-      return [...current, { date, total, accountAmounts, assetAmounts, holdingAmounts: currentHoldingAmounts }].sort((a, b) => a.date.localeCompare(b.date));
+      if (existing) return existing.accountAmounts && existing.accountCosts && existing.assetAmounts && existing.assetCosts && existing.holdingAmounts && existing.holdingCosts && typeof existing.cost === "number" ? current : current.map(snapshot => snapshot.date === date ? { ...snapshot, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts } : snapshot);
+      return [...current, { date, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts }].sort((a, b) => a.date.localeCompare(b.date));
     });
-  }, [accounts, assetAllocationByType, currentHoldingAmounts, hydrated, total]);
+  }, [accounts, assetAllocationByType, currentAccountCosts, currentAssetCosts, currentHoldingAmounts, currentHoldingCosts, hydrated, total, totalProfit]);
   useEffect(() => {
     if (!hydrated) return;
     const date = todayKst();
