@@ -35,6 +35,16 @@ const seohaPensionHoldings: Holding[] = [
   { symbol: "379780.KS", name: "RISE 미국S&P500", quantity: 16, averagePrice: 21578, fallbackPrice: 23224.125, accountId: 9 },
   { symbol: "CASH-KRW", name: "예수금", quantity: 1, averagePrice: 57785, fallbackPrice: 57785, accountId: 9, unit: "원" },
 ];
+const seohaOverseasAccount: Account = { id: 10, type: "미국 주식", broker: "대신증권", name: "해외 주식 계좌", amount: 47322777, returnRate: 108.97, color: "blue", portfolioId: "kim-seoha" };
+// 사용자가 제공한 대신증권 해외주식 잔고의 수량·달러 장부가·평가금액입니다.
+const seohaOverseasHoldings: Holding[] = [
+  ["EDV", "뱅가드 초장기 채권 ETF", 1, 163.88, 58.93], ["EMLC", "반에크 JP모건 신흥국 현지통화 국채 ETF", 2, 30.985, 51.03],
+  ["IAU", "아이셰어즈 금 ETF", 11, 77.2391, 894.78], ["LIT", "글로벌엑스 리튬 배터리 ETF", 72, 43.4389, 5295.18],
+  ["LTPZ", "핌코 물가연동채권 ETF", 2, 83.64, 94.67], ["SPHD", "인베스코 고배당 저변동 ETF", 70, 33.04, 3701.33],
+  ["SPYG", "SPDR 포트폴리오 S&P500 성장주 ETF", 80, 39.67, 9637.24], ["T", "AT&T", 7, 25.4329, 174.19],
+  ["TSLA", "테슬라", 1, 198.09, 333.9], ["VOO", "뱅가드 S&P 500 인덱스 ETF", 9, 262.68, 6321.45],
+  ["VT", "뱅가드 글로벌 주식 인덱스 ETF", 5, 80.0329, 797.72], ["XLY", "SPDR 임의 소비재 ETF", 50, 57.4, 5797.85],
+].map(([symbol, name, quantity, averagePrice, value]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(value) / Number(quantity), accountId: 10 }));
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -493,6 +503,8 @@ export default function Home() {
       if (!data.state.accounts?.some(account => account.id === seohaPensionAccount.id)) setAccounts(current => [...current, seohaPensionAccount]);
       if (!data.state.pensionHoldings?.some(holding => holding.accountId === seohaPensionAccount.id)) setPensionHoldings(current => [...current, ...seohaPensionHoldings]);
       else setPensionHoldings(current => current.map(holding => holding.accountId === seohaPensionAccount.id && holding.symbol === "RISE-US-SP500" ? { ...holding, symbol: "379780.KS" } : holding));
+      if (!data.state.accounts?.some(account => account.id === seohaOverseasAccount.id)) setAccounts(current => [...current, seohaOverseasAccount]);
+      if (!data.state.usdHoldings?.some(holding => holding.accountId === seohaOverseasAccount.id)) setUsdHoldings(current => [...current, ...seohaOverseasHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
