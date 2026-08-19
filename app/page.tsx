@@ -179,8 +179,11 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   const syncErrorShown = useRef(false);
   const total = useMemo(() => accounts.reduce((sum, account) => sum + account.amount, 0), [accounts]);
-  const weightedReturn = useMemo(() => total > 0 ? accounts.reduce((sum, account) => sum + account.amount * account.returnRate, 0) / total : 0, [accounts, total]);
   const totalProfit = useMemo(() => accounts.reduce((sum, account) => account.returnRate > -100 ? sum + account.amount - account.amount / (1 + account.returnRate / 100) : sum, 0), [accounts]);
+  const weightedReturn = useMemo(() => {
+    const totalCost = total - totalProfit;
+    return totalCost > 0 ? totalProfit / totalCost * 100 : 0;
+  }, [total, totalProfit]);
   const accountsByValue = useMemo(() => [...accounts].sort((a, b) => b.amount - a.amount), [accounts]);
   const assetAllocationByType = useMemo(() => {
     const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
