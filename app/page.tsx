@@ -254,7 +254,27 @@ export default function Home() {
     return costs;
   }, [holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
   const currentAccountCosts = useMemo(() => Object.fromEntries(accounts.map(account => [String(account.id), account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0])), [accounts]);
-  const currentAssetCosts = useMemo(() => Object.fromEntries(assetAllocationByType.map(asset => [asset.type, total > 0 ? asset.amount / total * (total - totalProfit) : 0])), [assetAllocationByType, total, totalProfit]);
+  const currentAssetCosts = useMemo(() => {
+    const grouped: Record<AssetType, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
+    const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
+      { positions: holdings, exchangeRate: 1 }, { positions: usdHoldings, exchangeRate: usdKrwRate }, { positions: fundHoldings, exchangeRate: 1 },
+      { positions: coinHoldings, exchangeRate: 1 }, { positions: pensionHoldings, exchangeRate: 1 }, { positions: isaHoldings, exchangeRate: 1 }, { positions: irpHoldings, exchangeRate: 1 },
+    ];
+    const positionsByAccount = new Map<number, Array<{ holding: Holding; value: number; cost: number }>>();
+    sources.forEach(({ positions, exchangeRate }) => positions.forEach(holding => {
+      if (!holding.accountId) return;
+      const positions = positionsByAccount.get(holding.accountId) ?? [];
+      positions.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate, cost: holding.quantity * holding.averagePrice * exchangeRate });
+      positionsByAccount.set(holding.accountId, positions);
+    }));
+    accounts.forEach(account => {
+      const positions = positionsByAccount.get(account.id) ?? [];
+      const value = positions.reduce((sum, item) => sum + item.value, 0);
+      if (!value) { grouped[assetTypeFor(account.type)] += currentAccountCosts[String(account.id)] ?? 0; return; }
+      positions.forEach(item => { grouped[assetTypeFor(account.type, item.holding)] += item.cost * account.amount / value; });
+    });
+    return grouped;
+  }, [accounts, coinHoldings, currentAccountCosts, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings, usdKrwRate]);
   const assetDetailsByType = useMemo(() => {
     const details = {} as Record<AssetType, { accounts: Map<number, number>; holdings: Array<{ account: Account; holding: Holding; value: number }> }>;
     (Object.keys(assetTypeMeta) as AssetType[]).forEach(type => { details[type] = { accounts: new Map(), holdings: [] }; });
@@ -432,7 +452,7 @@ export default function Home() {
     const cost = total - totalProfit;
     setSnapshots(current => {
       const existing = current.find(snapshot => snapshot.date === date);
-      if (existing) return existing.accountAmounts && existing.accountCosts && existing.assetAmounts && existing.assetCosts && existing.holdingAmounts && existing.holdingCosts && typeof existing.cost === "number" ? current : current.map(snapshot => snapshot.date === date ? { ...snapshot, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts } : snapshot);
+      if (existing) return current.map(snapshot => snapshot.date === date ? { ...snapshot, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts } : snapshot);
       return [...current, { date, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts }].sort((a, b) => a.date.localeCompare(b.date));
     });
   }, [accounts, assetAllocationByType, currentAccountCosts, currentAssetCosts, currentHoldingAmounts, currentHoldingCosts, hydrated, total, totalProfit]);
