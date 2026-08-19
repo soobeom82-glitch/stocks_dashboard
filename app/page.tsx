@@ -365,8 +365,10 @@ export default function Home() {
     return snapshots.filter(snapshot => snapshot.date >= startDate);
   }, [period, snapshots]);
   const portfolioPeriodSnapshots = useMemo(() => periodSnapshots.map(snapshot => {
-    const amount = portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountAmounts?.[String(account.id)] ?? 0), 0);
-    const cost = portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0);
+    const hasAccountAmounts = portfolioAccounts.some(account => typeof snapshot.accountAmounts?.[String(account.id)] === "number");
+    const hasAccountCosts = portfolioAccounts.some(account => typeof snapshot.accountCosts?.[String(account.id)] === "number");
+    const amount = hasAccountAmounts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountAmounts?.[String(account.id)] ?? 0), 0) : snapshot.total;
+    const cost = hasAccountCosts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0) : (snapshot.cost ?? 0);
     return { ...snapshot, total: amount, cost };
   }), [periodSnapshots, portfolioAccounts]);
   const trendItems = useMemo(() => [
