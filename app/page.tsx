@@ -63,6 +63,31 @@ const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const accountLabel = (name: string) => name.replace(/\s*[·ㆍ]\s*\d[\d-]*$/u, "");
 const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name}`;
+// 초기 등록 때 사용한 임시 식별자를 한국거래소 종목코드로 승격합니다.
+// 기존 Vercel 저장 데이터와 스냅샷도 이 매핑으로 함께 이관합니다.
+const canonicalKrwTickers: Record<string, string> = {
+  PLUS200: "152100.KS",
+  "KODEX-MSCI-KR": "278540.KS",
+  "TIGER-MSCI-KR": "310970.KS",
+  "RISE-USD-INVERSE": "139660.KS",
+};
+const migrateHoldingTicker = (holding: Holding): Holding => {
+  const symbol = canonicalKrwTickers[holding.symbol];
+  return symbol ? { ...holding, symbol, previousClose: undefined } : holding;
+};
+const migrateSnapshotTickerKeys = (record?: Record<string, number>) => {
+  if (!record) return record;
+  return Object.fromEntries(Object.entries(record).map(([key, value]) => {
+    const migratedKey = Object.entries(canonicalKrwTickers).reduce((next, [legacy, symbol]) => next.replace(`:${legacy}:`, `:${symbol}:`), key);
+    return [migratedKey, value];
+  }));
+};
+const migrateSnapshotTickers = (snapshot: Snapshot): Snapshot => ({
+  ...snapshot,
+  holdingAmounts: migrateSnapshotTickerKeys(snapshot.holdingAmounts),
+  holdingCosts: migrateSnapshotTickerKeys(snapshot.holdingCosts),
+});
+const migrateProfitPeakTickers = (peaks: Record<string, ProfitPeak>) => Object.fromEntries(Object.entries(peaks).map(([key, value]) => [canonicalKrwTickers[key] ?? key, value]));
 const assetTypeMeta: Record<AssetType, { color: string }> = {
   "국내 주식": { color: "violet" }, "해외 주식": { color: "blue" }, "채권·현금성": { color: "mint" },
   "대체자산": { color: "orange" }, "펀드": { color: "pink" }, "가상자산": { color: "yellow" },
@@ -501,10 +526,10 @@ export default function Home() {
       if (Array.isArray(data.state.portfolios) && data.state.portfolios.length) setPortfolios(data.state.portfolios.filter(item => typeof item?.id === "string" && typeof item?.name === "string"));
       if (Array.isArray(data.state.accounts)) setAccounts(normalizeAccounts(data.state.accounts));
       if (Array.isArray(data.state.imports)) setImports(data.state.imports);
-      if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number"));
-      if (data.state.profitPeaks && typeof data.state.profitPeaks === "object") setProfitPeaks(data.state.profitPeaks);
+      if (Array.isArray(data.state.snapshots)) setSnapshots(data.state.snapshots.filter(snapshot => typeof snapshot.date === "string" && typeof snapshot.total === "number").map(migrateSnapshotTickers));
+      if (data.state.profitPeaks && typeof data.state.profitPeaks === "object") setProfitPeaks(migrateProfitPeakTickers(data.state.profitPeaks));
       if (typeof data.state.irpResetVersion === "number") setIrpResetVersion(data.state.irpResetVersion);
-      if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => ({ ...item, accountId: item.accountId ?? 2 })));
+      if (Array.isArray(data.state.holdings)) setHoldings(data.state.holdings.map(item => migrateHoldingTicker({ ...item, accountId: item.accountId ?? 2 })));
       if (Array.isArray(data.state.usdHoldings)) setUsdHoldings(data.state.usdHoldings.map(item => ({ ...item, accountId: item.accountId ?? 1 })));
       else setUsdHoldings(importedUsdHoldings);
       if (Array.isArray(data.state.fundHoldings)) setFundHoldings(data.state.fundHoldings.map(item => ({ ...item, accountId: item.accountId ?? 6 })));
