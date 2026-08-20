@@ -447,7 +447,7 @@ export default function Home() {
   const refreshKrw = async (items: Holding[], setter: React.Dispatch<React.SetStateAction<Holding[]>>, type: string, setUpdated: React.Dispatch<React.SetStateAction<string>>) => {
     if (!items.length) { setNotice("현재가를 반영할 보유 종목이 없습니다."); return; }
     try {
-      const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(items.filter(item => item.symbol.endsWith(".KS")).map(item => item.symbol).join(","))}`);
+      const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(items.filter(item => item.symbol.endsWith(".KS")).map(item => item.symbol).join(","))}&fields=previous-close-v1`, { cache: "no-store" });
       const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
       if (!data.quotes) throw new Error("No quotes");
       setter(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose })); updateStockAccounts(type, next); return next; });
@@ -457,7 +457,7 @@ export default function Home() {
   const refreshUsdPrices = async () => {
     if (!usdHoldings.length) { setNotice("현재가를 반영할 미국 주식 보유 종목이 없습니다."); return; }
     try {
-      const response = await fetch(`/api/quotes?includeExchangeRate=1&symbols=${encodeURIComponent(usdHoldings.map(item => item.symbol).join(","))}`);
+      const response = await fetch(`/api/quotes?includeExchangeRate=1&symbols=${encodeURIComponent(usdHoldings.map(item => item.symbol).join(","))}&fields=previous-close-v1`, { cache: "no-store" });
       const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; exchangeRate?: number | null };
       if (!data.quotes || !data.exchangeRate) throw new Error("No quotes");
       setUsdKrwRate(data.exchangeRate);
@@ -484,7 +484,7 @@ export default function Home() {
   const refreshIrpPrices = async () => {
     const symbols = irpHoldings.filter(item => item.assetClass === "ETF·주식" && item.symbol.endsWith(".KS")).map(item => item.symbol);
     if (!symbols.length) { setNotice("현재가를 반영할 IRP ETF가 없습니다."); return; }
-    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`); const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
+    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}&fields=previous-close-v1`, { cache: "no-store" }); const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
   };
   useEffect(() => { if (holdings.length) void refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt); }, [holdings.length]);
   useEffect(() => { if (usdHoldings.length) void refreshUsdPrices(); }, [usdHoldings.length]);

@@ -35,5 +35,7 @@ export async function GET(request: Request) {
   const quotes = Object.fromEntries(available.map(([symbol, quote]) => [symbol, quote.price]));
   const previousCloses = Object.fromEntries(available.flatMap(([symbol, quote]) => quote.previousClose === null ? [] : [[symbol, quote.previousClose]]));
   const exchangeRate = includeExchangeRate ? await usdKrwRate() : null;
-  return Response.json({ quotes, previousCloses, exchangeRate, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "public, max-age=21600" } });
+  // 가격 원본은 Next 데이터 캐시에서 6시간 재사용하지만, 브라우저에는 오래된 응답을 저장하지 않습니다.
+  // 전일 종가처럼 새로 추가된 필드가 이전 응답 캐시 때문에 누락되는 것을 방지합니다.
+  return Response.json({ quotes, previousCloses, exchangeRate, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
 }
