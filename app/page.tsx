@@ -70,6 +70,7 @@ const canonicalKrwTickers: Record<string, string> = {
   "KODEX-MSCI-KR": "278540.KS",
   "TIGER-MSCI-KR": "310970.KS",
   "RISE-USD-INVERSE": "139660.KS",
+  "PLUS-NASDAQ-TECH": "287180.KS",
 };
 const migrateHoldingTicker = (holding: Holding): Holding => {
   const symbol = canonicalKrwTickers[holding.symbol];
