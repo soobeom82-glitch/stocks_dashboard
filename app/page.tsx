@@ -10,7 +10,7 @@ import "./trend.css";
 
 type Portfolio = { id: string; name: string };
 type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string; portfolioId?: string };
-type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
+type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
 type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Partial<Record<AssetType, number>>; assetCosts?: Partial<Record<AssetType, number>>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
 type ProfitPeak = { profit: number; date: string };
@@ -191,14 +191,16 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
     <p className="holdings-note">{note}</p>
     {(isIrp || contributionLimits.length > 0) && <section className="account-limit-summary"><div className="limit-summary-head"><p className="eyebrow">ACCOUNT LIMITS</p><span>2026년 기준</span></div><div className="limit-summary-grid">{isIrp && <div className="limit-metric"><span>위험자산 비중</span><strong className={irpRiskyRate <= 70 ? "limit-ok" : "limit-alert"}>{irpRiskyRate.toFixed(1)}% <small>/ 70.0%</small></strong><small>ETF·주식 {won.format(irpRiskyAmount)}</small></div>}{contributionLimits.map(item => <div className="limit-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div><p>{["연금저축", "IRP"].includes(account.type) ? "연금저축 CMA의 올해 납입금액 600만원을 반영했습니다. IRP 납입액을 추가하면 합산 잔여 한도가 자동 갱신됩니다." : "납입 잔여 한도는 납입 내역을 등록하면 계산해 표시합니다."}</p></section>}
     <section className="account-holding-trend"><div className="detail-head"><div><p className="eyebrow">HOLDING PERFORMANCE</p><h4>보유 종목 추이</h4></div></div><p className="holdings-note">아래 보유 종목 행을 클릭하면 그래프에 추가됩니다. 선택하지 않으면 계좌 합산 추이를 표시합니다.</p><div className="trend-series-list"><TrendChart series={visibleHoldingTrendItems} showLegend={false} /></div></section>
-    {positions.length === 0 ? <div className="empty-holdings">등록된 {isCoin ? "코인 보유자산" : "보유 종목"}이 없습니다.</div> : groups.map(group => <div className="holding-group" key={group.assetClass}>{isIrp && <h4>{group.assetClass}</h4>}<div className="holding-table"><div><span>{isCoin ? "코인" : isIrp ? "상품" : "종목"}</span><span>보유 수량</span><span>매입금액</span><span>평가금액</span><span>평가손익</span><span>수익률</span></div>{group.positions.map(holding => {
+    {positions.length === 0 ? <div className="empty-holdings">등록된 {isCoin ? "코인 보유자산" : "보유 종목"}이 없습니다.</div> : groups.map(group => <div className="holding-group" key={group.assetClass}>{isIrp && <h4>{group.assetClass}</h4>}<div className="holding-table"><div><span>{isCoin ? "코인" : isIrp ? "상품" : "종목"}</span><span>보유 수량</span><span>매입금액</span><span>평가금액</span><span>전일 대비</span><span>평가손익</span><span>수익률</span></div>{group.positions.map(holding => {
       const multiplier = isUsd ? exchangeRate : 1;
       const cost = holding.quantity * holding.averagePrice * multiplier;
       const value = holding.quantity * holding.fallbackPrice * multiplier;
       const profit = value - cost;
       const rate = cost > 0 ? (value / cost - 1) * 100 : 0;
+      const dailyChange = holding.previousClose ? holding.fallbackPrice - holding.previousClose : null;
+      const dailyRate = holding.previousClose ? dailyChange! / holding.previousClose * 100 : null;
       const trendId = holdingTrendId(holding);
-      return <div key={`${holding.symbol}-${holding.name}`} className={selectedTrendItems.includes(trendId) ? "holding-trend-selected" : ""} role="button" tabIndex={0} onClick={event => { event.stopPropagation(); onToggleTrendItem(trendId); }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onToggleTrendItem(trendId); } }} aria-pressed={selectedTrendItems.includes(trendId)}><b>{holding.name}<small>{isKrwStock ? holding.symbol.replace(".KS", "") : holding.symbol}{isUsd ? ` · $${holding.fallbackPrice.toFixed(2)}` : ""}{isIrp && holding.marketPrice ? ` · 현재가 ${won.format(holding.marketPrice)}` : ""}</small></b><span>{isCoin ? `${holding.quantity.toLocaleString("ko-KR", { maximumFractionDigits: 8 })} ${holding.symbol}` : `${holding.quantity}${holding.unit ?? "주"}`}</span><span>{won.format(cost)}</span><span>{won.format(value)}</span><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><strong className={rate >= 0 ? "positive" : "negative"}>{percent(rate)}</strong></div>;
+      return <div key={`${holding.symbol}-${holding.name}`} className={selectedTrendItems.includes(trendId) ? "holding-trend-selected" : ""} role="button" tabIndex={0} onClick={event => { event.stopPropagation(); onToggleTrendItem(trendId); }} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); onToggleTrendItem(trendId); } }} aria-pressed={selectedTrendItems.includes(trendId)}><b>{holding.name}<small>{isKrwStock ? holding.symbol.replace(".KS", "") : holding.symbol}{isUsd ? ` · $${holding.fallbackPrice.toFixed(2)}` : ""}{isIrp && holding.marketPrice ? ` · 현재가 ${won.format(holding.marketPrice)}` : ""}</small></b><span>{isCoin ? `${holding.quantity.toLocaleString("ko-KR", { maximumFractionDigits: 8 })} ${holding.symbol}` : `${holding.quantity}${holding.unit ?? "주"}`}</span><span>{won.format(cost)}</span><span>{won.format(value)}</span><strong className={dailyChange === null ? "muted-cell" : dailyChange >= 0 ? "positive" : "negative"}>{dailyChange === null || dailyRate === null ? "—" : <>{dailyChange >= 0 ? "+" : ""}{isUsd ? `$${dailyChange.toFixed(2)}` : won.format(dailyChange)}<small>{percent(dailyRate)}</small></>}</strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><strong className={rate >= 0 ? "positive" : "negative"}>{percent(rate)}</strong></div>;
     })}</div></div>)}
   </div>;
 }
@@ -446,9 +448,9 @@ export default function Home() {
     if (!items.length) { setNotice("현재가를 반영할 보유 종목이 없습니다."); return; }
     try {
       const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(items.filter(item => item.symbol.endsWith(".KS")).map(item => item.symbol).join(","))}`);
-      const data = await response.json() as { quotes?: Record<string, number> };
+      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
       if (!data.quotes) throw new Error("No quotes");
-      setter(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice })); updateStockAccounts(type, next); return next; });
+      setter(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose })); updateStockAccounts(type, next); return next; });
       setUpdated(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("현재가를 불러오지 못했습니다. 마지막 확인 가격으로 계산합니다."); }
   };
@@ -456,10 +458,10 @@ export default function Home() {
     if (!usdHoldings.length) { setNotice("현재가를 반영할 미국 주식 보유 종목이 없습니다."); return; }
     try {
       const response = await fetch(`/api/quotes?includeExchangeRate=1&symbols=${encodeURIComponent(usdHoldings.map(item => item.symbol).join(","))}`);
-      const data = await response.json() as { quotes?: Record<string, number>; exchangeRate?: number | null };
+      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; exchangeRate?: number | null };
       if (!data.quotes || !data.exchangeRate) throw new Error("No quotes");
       setUsdKrwRate(data.exchangeRate);
-      setUsdHoldings(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice })); updateStockAccounts("미국 주식", next, data.exchangeRate!); return next; });
+      setUsdHoldings(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose })); updateStockAccounts("미국 주식", next, data.exchangeRate!); return next; });
       setUsdQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("미국 주식 현재가 또는 환율을 불러오지 못했습니다. 마지막 확인 값으로 계산합니다."); }
   };
@@ -482,7 +484,7 @@ export default function Home() {
   const refreshIrpPrices = async () => {
     const symbols = irpHoldings.filter(item => item.assetClass === "ETF·주식" && item.symbol.endsWith(".KS")).map(item => item.symbol);
     if (!symbols.length) { setNotice("현재가를 반영할 IRP ETF가 없습니다."); return; }
-    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`); const data = await response.json() as { quotes?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
+    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}`); const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
   };
   useEffect(() => { if (holdings.length) void refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt); }, [holdings.length]);
   useEffect(() => { if (usdHoldings.length) void refreshUsdPrices(); }, [usdHoldings.length]);
