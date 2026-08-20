@@ -71,6 +71,9 @@ const canonicalKrwTickers: Record<string, string> = {
   "TIGER-MSCI-KR": "310970.KS",
   "RISE-USD-INVERSE": "139660.KS",
   "PLUS-NASDAQ-TECH": "287180.KS",
+  "IRP-NASDAQ100": "133690.KS",
+  "IRP-NIFTY50": "200250.KS",
+  "IRP-TRF3070": "329650.KS",
 };
 const migrateHoldingTicker = (holding: Holding): Holding => {
   const symbol = canonicalKrwTickers[holding.symbol];
@@ -161,9 +164,9 @@ const importedUsdHoldings: Holding[] = [
 ].map(([symbol, name, quantity, averagePrice, fallbackPrice]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(fallbackPrice), accountId: 1 }));
 const importedFundHoldings: Holding[] = [{ symbol: "LIFEPLUS-TDF2040-J-PE", name: "한화 LIFEPLUS 적격 TDF2040 연금 J-Pe", quantity: 1, averagePrice: 3010000, fallbackPrice: 4527457, accountId: 6, unit: "건" }];
 const importedIrpHoldings: Holding[] = [
-  ["TIGER 미국나스닥100", "IRP-NASDAQ100", 452, 30461360, 85235900, "ETF·주식"], ["KIWOOM 인도Nifty50(합성)", "IRP-NIFTY50", 80, 1477800, 1779600, "ETF·주식"],
+  ["TIGER 미국나스닥100", "133690.KS", 452, 30461360, 85235900, "ETF·주식"], ["KIWOOM 인도Nifty50(합성)", "200250.KS", 80, 1477800, 1779600, "ETF·주식"],
   ["TIGER 코리아TOP10", "292150.KS", 732, 9626035, 28203960, "ETF·주식"], ["신한알파리츠", "293940.KS", 1788, 12764590, 9451260, "ETF·주식"],
-  ["KODEX TRF3070", "IRP-TRF3070", 1068, 12466650, 15197640, "ETF·주식"], ["ACE 미국S&P500", "360200.KS", 189, 2346435, 5235360, "ETF·주식"],
+  ["KODEX TRF3070", "329650.KS", 1068, 12466650, 15197640, "ETF·주식"], ["ACE 미국S&P500", "360200.KS", 189, 2346435, 5235360, "ETF·주식"],
   ["TIGER 차이나전기차SOLACTIVE", "371460.KS", 163, 2773925, 1782405, "ETF·주식"], ["미래에셋증권현금성자산", "IRP-CASH", 1, 1385975, 1385975, "현금성·금융상품"],
   ["애큐온저축은행예금 IRP(개인) 1Y_퇴직", "IRP-ACCION", 1, 394370, 401192, "현금성·금융상품"], ["(통합)(무)흥국생명보험 퇴직연금 이율보증형 3년 (IRP)", "IRP-HEUNGKUK", 1, 433563, 456789, "현금성·금융상품"],
   ["(통합)KB손해보험 원리금보장형 이율보증형 3년 (DC/IRP)", "IRP-KB", 1, 1700932, 1740738, "현금성·금융상품"],
@@ -200,7 +203,7 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
   };
   // 증권사 위험자산 산정 화면(2026-08-19)과 맞춘 상품별 분류입니다.
   // TRF3070과 차이나전기차 SOLACTIVE는 이 계좌에서 위험자산 투자비율에 포함되지 않습니다.
-  const irpExcludedRiskSymbols = new Set(["IRP-TRF3070", "371460.KS"]);
+  const irpExcludedRiskSymbols = new Set(["329650.KS", "371460.KS"]);
   const irpRiskyAmount = isIrp ? positions.filter(holding => holding.assetClass === "ETF·주식" && !irpExcludedRiskSymbols.has(holding.symbol)).reduce((sum, holding) => sum + holding.quantity * holding.fallbackPrice, 0) : 0;
   const irpRiskyRate = account.amount > 0 ? irpRiskyAmount / account.amount * 100 : 0;
   const contributionLimits = account.type === "ISA"
@@ -538,7 +541,7 @@ export default function Home() {
       if (Array.isArray(data.state.coinHoldings)) setCoinHoldings(data.state.coinHoldings.map(item => ({ ...item, accountId: item.accountId ?? 7 })));
       if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings.map(item => ({ ...item, accountId: item.accountId ?? 5 })));
       if (Array.isArray(data.state.isaHoldings)) setIsaHoldings(data.state.isaHoldings.map(item => ({ ...item, accountId: item.accountId ?? 3 })));
-      if (Array.isArray(data.state.irpHoldings)) setIrpHoldings(data.state.irpHoldings.map(item => ({ ...item, accountId: item.accountId ?? 4 })));
+      if (Array.isArray(data.state.irpHoldings)) setIrpHoldings(data.state.irpHoldings.map(item => migrateHoldingTicker({ ...item, accountId: item.accountId ?? 4 })));
       if (!data.state.accounts?.some(account => account.id === seohaPensionAccount.id)) setAccounts(current => [...current, seohaPensionAccount]);
       if (!data.state.pensionHoldings?.some(holding => holding.accountId === seohaPensionAccount.id)) setPensionHoldings(current => [...current, ...seohaPensionHoldings]);
       else setPensionHoldings(current => current.map(holding => holding.accountId === seohaPensionAccount.id && holding.symbol === "RISE-US-SP500" ? { ...holding, symbol: "379780.KS" } : holding));
