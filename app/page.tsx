@@ -35,7 +35,7 @@ const seohaPensionHoldings: Holding[] = [
   { symbol: "379780.KS", name: "RISE 미국S&P500", quantity: 16, averagePrice: 21578, fallbackPrice: 23224.125, accountId: 9 },
   { symbol: "CASH-KRW", name: "예수금", quantity: 1, averagePrice: 57785, fallbackPrice: 57785, accountId: 9, unit: "원" },
 ];
-const seohaOverseasAccount: Account = { id: 10, type: "미국 주식", broker: "대신증권", name: "해외 주식 계좌", amount: 47322777, returnRate: 108.97, color: "blue", portfolioId: "kim-seoha" };
+const seohaOverseasAccount: Account = { id: 10, type: "미국 주식", broker: "대신증권", name: "해외 주식 계좌", amount: 52555813, returnRate: 85.34, color: "blue", portfolioId: "kim-seoha" };
 // 사용자가 제공한 대신증권 해외주식 잔고의 수량·달러 장부가·평가금액입니다.
 const seohaOverseasHoldings: Holding[] = [
   ["EDV", "뱅가드 초장기 채권 ETF", 1, 163.88, 58.93], ["EMLC", "반에크 JP모건 신흥국 현지통화 국채 ETF", 2, 30.985, 51.03],
@@ -45,6 +45,11 @@ const seohaOverseasHoldings: Holding[] = [
   ["TSLA", "테슬라", 1, 198.09, 333.9], ["VOO", "뱅가드 S&P 500 인덱스 ETF", 9, 262.68, 6321.45],
   ["VT", "뱅가드 글로벌 주식 인덱스 ETF", 5, 80.0329, 797.72], ["XLY", "SPDR 임의 소비재 ETF", 50, 57.4, 5797.85],
 ].map(([symbol, name, quantity, averagePrice, value]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(value) / Number(quantity), accountId: 10 }));
+// 장외 미국채: 공개 시세 티커가 없어 스크린샷의 달러 평가금액을 기준값으로 유지합니다.
+const seohaUsBondHoldings: Holding[] = [
+  { symbol: "US01375-5008", name: "미국 국채 (USD) 01375-5008", quantity: 7500, averagePrice: 3796.05 / 7500, fallbackPrice: 3472.28 / 7500, accountId: 10 },
+  { symbol: "US04250-3508", name: "미국 국채 (USD) 04250-3508", quantity: 200, averagePrice: 205.28 / 200, fallbackPrice: 194.42 / 200, accountId: 10 },
+];
 const eunhoPensionAccount: Account = { id: 11, type: "연금저축", broker: "대신증권", name: "연금저축 계좌", amount: 39470978, returnRate: 31.67, color: "pink", portfolioId: "kim-eunho" };
 const eunhoPensionHoldings: Holding[] = [
   ["284430.KS", "KODEX 200미국채혼합50", 1019, 17010, 20751672],
@@ -512,6 +517,7 @@ export default function Home() {
       else setPensionHoldings(current => current.map(holding => holding.accountId === seohaPensionAccount.id && holding.symbol === "RISE-US-SP500" ? { ...holding, symbol: "379780.KS" } : holding));
       if (!data.state.accounts?.some(account => account.id === seohaOverseasAccount.id)) setAccounts(current => [...current, seohaOverseasAccount]);
       if (!data.state.usdHoldings?.some(holding => holding.accountId === seohaOverseasAccount.id)) setUsdHoldings(current => [...current, ...seohaOverseasHoldings]);
+      if (!data.state.usdHoldings?.some(holding => holding.accountId === seohaOverseasAccount.id && holding.symbol === seohaUsBondHoldings[0].symbol)) setUsdHoldings(current => [...current, ...seohaUsBondHoldings]);
       if (!data.state.accounts?.some(account => account.id === eunhoPensionAccount.id)) setAccounts(current => [...current, eunhoPensionAccount]);
       if (!data.state.pensionHoldings?.some(holding => holding.accountId === eunhoPensionAccount.id)) setPensionHoldings(current => [...current, ...eunhoPensionHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
