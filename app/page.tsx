@@ -500,9 +500,17 @@ export default function Home() {
     if (!coinHoldings.length) { setNotice("현재가를 반영할 코인 보유자산이 없습니다."); return; }
     try {
       const response = await fetch(`/api/crypto-quotes?markets=${encodeURIComponent(coinHoldings.map(item => `KRW-${item.symbol}`).join(","))}`);
-      const data = await response.json() as { quotes?: Record<string, number> };
+      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
       if (!data.quotes) throw new Error("No quotes");
-      setCoinHoldings(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[`KRW-${holding.symbol}`] ?? holding.fallbackPrice })); updateStockAccounts("코인", next); return next; });
+      setCoinHoldings(current => {
+        const next = current.map(holding => ({
+          ...holding,
+          fallbackPrice: data.quotes?.[`KRW-${holding.symbol}`] ?? holding.fallbackPrice,
+          previousClose: data.previousCloses?.[`KRW-${holding.symbol}`] ?? holding.previousClose,
+        }));
+        updateStockAccounts("코인", next);
+        return next;
+      });
       setCoinQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("코인 현재가를 불러오지 못했습니다. 마지막 확인 가격으로 계산합니다."); }
   };

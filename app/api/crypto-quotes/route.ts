@@ -10,9 +10,10 @@ export async function GET(request: Request) {
       next: { revalidate: 21600 },
     });
     if (!response.ok) throw new Error("Upbit quote request failed");
-    const rows = await response.json() as Array<{ market?: string; trade_price?: number }>;
+    const rows = await response.json() as Array<{ market?: string; trade_price?: number; prev_closing_price?: number }>;
     const quotes = Object.fromEntries(rows.filter((row): row is { market: string; trade_price: number } => typeof row.market === "string" && typeof row.trade_price === "number" && row.trade_price > 0).map(row => [row.market, row.trade_price]));
-    return Response.json({ quotes, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "public, max-age=21600" } });
+    const previousCloses = Object.fromEntries(rows.filter((row): row is { market: string; prev_closing_price: number } => typeof row.market === "string" && typeof row.prev_closing_price === "number" && row.prev_closing_price > 0).map(row => [row.market, row.prev_closing_price]));
+    return Response.json({ quotes, previousCloses, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "public, max-age=21600" } });
   } catch {
     return Response.json({ error: "코인 현재가를 불러오지 못했습니다." }, { status: 502 });
   }
