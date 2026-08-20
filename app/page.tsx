@@ -499,7 +499,7 @@ export default function Home() {
   const refreshCoinPrices = async () => {
     if (!coinHoldings.length) { setNotice("현재가를 반영할 코인 보유자산이 없습니다."); return; }
     try {
-      const response = await fetch(`/api/crypto-quotes?markets=${encodeURIComponent(coinHoldings.map(item => `KRW-${item.symbol}`).join(","))}`);
+      const response = await fetch(`/api/crypto-quotes?markets=${encodeURIComponent(coinHoldings.map(item => `KRW-${item.symbol}`).join(","))}`, { cache: "no-store" });
       const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
       if (!data.quotes) throw new Error("No quotes");
       setCoinHoldings(current => {
