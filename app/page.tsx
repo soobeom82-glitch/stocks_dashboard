@@ -539,7 +539,7 @@ export default function Home() {
       if (Array.isArray(data.state.fundHoldings)) setFundHoldings(data.state.fundHoldings.map(item => ({ ...item, accountId: item.accountId ?? 6 })));
       else setFundHoldings(importedFundHoldings);
       if (Array.isArray(data.state.coinHoldings)) setCoinHoldings(data.state.coinHoldings.map(item => ({ ...item, accountId: item.accountId ?? 7 })));
-      if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings.map(item => ({ ...item, accountId: item.accountId ?? 5 })));
+      if (Array.isArray(data.state.pensionHoldings)) setPensionHoldings(data.state.pensionHoldings.map(item => migrateHoldingTicker({ ...item, accountId: item.accountId ?? 5 })));
       if (Array.isArray(data.state.isaHoldings)) setIsaHoldings(data.state.isaHoldings.map(item => ({ ...item, accountId: item.accountId ?? 3 })));
       if (Array.isArray(data.state.irpHoldings)) setIrpHoldings(data.state.irpHoldings.map(item => migrateHoldingTicker({ ...item, accountId: item.accountId ?? 4 })));
       if (!data.state.accounts?.some(account => account.id === seohaPensionAccount.id)) setAccounts(current => [...current, seohaPensionAccount]);
