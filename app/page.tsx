@@ -115,6 +115,10 @@ const assetTypeFor = (accountType: string, holding?: Holding): AssetType => {
   if (/미국|나스닥|s&p|nifty|차이나|글로벌|msci|해외|인도/.test(text)) return "해외 주식";
   return "국내 주식";
 };
+const assetWeightsFor = (accountType: string, holding?: Holding): Array<[AssetType, number]> =>
+  holding?.symbol === "284430.KS"
+    ? [["국내 주식", 0.5], ["채권·현금성", 0.5]]
+    : [[assetTypeFor(accountType, holding), 1]];
 const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   1: { name: "미국 주식 계좌", broker: "키움증권" },
   2: { name: "국내 주식 계좌", broker: "삼성증권" },
@@ -324,21 +328,20 @@ export default function Home() {
         current.previous += account.amount;
         assetTotals.set(type, current);
       }
-      entries.forEach(item => {
-        const type = assetTypeFor(account.type, item.holding);
-        const currentValue = item.current * scale;
-        const previousValue = item.previous * scale;
+      entries.forEach(item => assetWeightsFor(account.type, item.holding).forEach(([type, weight]) => {
+        const currentValue = item.current * scale * weight;
+        const previousValue = item.previous * scale * weight;
         const current = assetTotals.get(type) ?? { current: 0, previous: 0, hasComparison: false };
         current.current += currentValue;
         current.previous += previousValue;
         current.hasComparison ||= item.hasComparison;
         assetTotals.set(type, current);
-      });
+      }));
       (Object.keys(assetTypeMeta) as AssetType[]).forEach(type => {
-        const entriesForType = entries.filter(item => assetTypeFor(account.type, item.holding) === type);
+        const entriesForType = entries.flatMap(item => assetWeightsFor(account.type, item.holding).filter(([candidate]) => candidate === type).map(([, weight]) => ({ ...item, weight })));
         if (!entriesForType.length) return;
-        const current = entriesForType.reduce((sum, item) => sum + item.current * scale, 0);
-        const previous = entriesForType.reduce((sum, item) => sum + item.previous * scale, 0);
+        const current = entriesForType.reduce((sum, item) => sum + item.current * scale * item.weight, 0);
+        const previous = entriesForType.reduce((sum, item) => sum + item.previous * scale * item.weight, 0);
         const known = entriesForType.some(item => item.hasComparison);
         assetAccountRates.set(`${type}:${account.id}`, known && previous > 0 ? (current / previous - 1) * 100 : null);
       });
@@ -364,7 +367,7 @@ export default function Home() {
       const positions = positionsByAccount.get(account.id) ?? [];
       const positionsTotal = positions.reduce((sum, item) => sum + item.value, 0);
       if (!positionsTotal) { grouped[assetTypeFor(account.type)] += account.amount; return; }
-      positions.forEach(({ holding, value }) => { grouped[assetTypeFor(account.type, holding)] += account.amount * value / positionsTotal; });
+      positions.forEach(({ holding, value }) => assetWeightsFor(account.type, holding).forEach(([type, weight]) => { grouped[type] += account.amount * value / positionsTotal * weight; }));
     });
     return (Object.entries(grouped) as Array<[AssetType, number]>).filter(([, amount]) => amount > 0).map(([type, amount]) => ({ type, amount, color: assetTypeMeta[type].color })).sort((a, b) => b.amount - a.amount);
   }, [portfolioAccounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
@@ -421,7 +424,7 @@ export default function Home() {
       const positions = positionsByAccount.get(account.id) ?? [];
       const value = positions.reduce((sum, item) => sum + item.value, 0);
       if (!value) { grouped[assetTypeFor(account.type)] += currentAccountCosts[String(account.id)] ?? 0; return; }
-      positions.forEach(item => { grouped[assetTypeFor(account.type, item.holding)] += item.cost * account.amount / value; });
+      positions.forEach(item => assetWeightsFor(account.type, item.holding).forEach(([type, weight]) => { grouped[type] += item.cost * account.amount / value * weight; }));
     });
     return grouped;
   }, [portfolioAccounts, coinHoldings, currentAccountCosts, fundHoldings, holdings, irpHoldings, isaHoldings, pensionHoldings, usdHoldings, usdKrwRate]);
@@ -436,7 +439,7 @@ export default function Home() {
         const holdingValue = entries.reduce((sum, item) => sum + item.value, 0);
         const accountValue = snapshot.accountAmounts?.[String(account.id)] ?? holdingValue;
         if (!holdingValue) { grouped[assetTypeFor(account.type)] += snapshot.accountCosts?.[String(account.id)] ?? 0; return; }
-        entries.forEach(item => { grouped[assetTypeFor(account.type, item.holding)] += item.cost * accountValue / holdingValue; });
+        entries.forEach(item => assetWeightsFor(account.type, item.holding).forEach(([type, weight]) => { grouped[type] += item.cost * accountValue / holdingValue * weight; }));
       });
       return grouped;
     };
@@ -459,13 +462,12 @@ export default function Home() {
       const positions = positionsByAccount.get(account.id) ?? [];
       const positionsTotal = positions.reduce((sum, item) => sum + item.value, 0);
       if (!positionsTotal) { details[assetTypeFor(account.type)].accounts.set(account.id, account.amount); return; }
-      positions.forEach(({ holding, value }) => {
-        const allocatedValue = account.amount * value / positionsTotal;
-        const type = assetTypeFor(account.type, holding);
+      positions.forEach(({ holding, value }) => assetWeightsFor(account.type, holding).forEach(([type, weight]) => {
+        const allocatedValue = account.amount * value / positionsTotal * weight;
         const detail = details[type];
         detail.accounts.set(account.id, (detail.accounts.get(account.id) ?? 0) + allocatedValue);
         detail.holdings.push({ account, holding, value: allocatedValue });
-      });
+      }));
     });
     return details;
   }, [portfolioAccounts, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);

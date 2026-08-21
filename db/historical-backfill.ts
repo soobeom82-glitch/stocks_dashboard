@@ -23,6 +23,11 @@ function assetTypeFor(account: Account, holding?: Holding): AssetType {
   if (account.type === "미국 주식" || /미국|나스닥|s&p|nifty|차이나|글로벌|msci|해외|인도/.test(text)) return "해외 주식";
   return "국내 주식";
 }
+function assetWeightsFor(account: Account, holding?: Holding): Array<[AssetType, number]> {
+  return holding?.symbol === "284430.KS"
+    ? [["국내 주식", 0.5], ["채권·현금성", 0.5]]
+    : [[assetTypeFor(account, holding), 1]];
+}
 
 async function yahooHistory(symbol: string, count: number) {
   const end = Math.floor(Date.now() / 1000) + 86_400;
@@ -95,9 +100,10 @@ export async function backfillRecentSnapshots(count = 10) {
         const key = holdingKey(account.id, row.holding);
         holdingAmounts[key] = row.value;
         holdingCosts[key] = row.cost;
-        const type = assetTypeFor(account, row.holding);
-        assetAmounts[type] += row.value;
-        assetCosts[type] += row.cost;
+        assetWeightsFor(account, row.holding).forEach(([type, weight]) => {
+          assetAmounts[type] += row.value * weight;
+          assetCosts[type] += row.cost * weight;
+        });
       });
     });
     const total = Object.values(accountAmounts).reduce((sum, value) => sum + value, 0);

@@ -66,6 +66,11 @@ function assetTypeFor(accountType: string, holding?: Holding) {
   if (/미국|나스닥|s&p|nifty|차이나|글로벌|msci|해외|인도/.test(text)) return "해외 주식";
   return "국내 주식";
 }
+function assetWeightsFor(accountType: string, holding?: Holding): Array<[string, number]> {
+  return holding?.symbol === "284430.KS"
+    ? [["국내 주식", 0.5], ["채권·현금성", 0.5]]
+    : [[assetTypeFor(accountType, holding), 1]];
+}
 
 function computeAssetAmounts(accounts: Account[], sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
   const amounts: Record<string, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
@@ -80,7 +85,7 @@ function computeAssetAmounts(accounts: Account[], sources: Array<{ holdings: Hol
     const positions = positionsByAccount.get(account.id) ?? [];
     const positionsTotal = positions.reduce((sum, position) => sum + position.value, 0);
     if (!positionsTotal) { amounts[assetTypeFor(account.type)] += account.amount; return; }
-    positions.forEach(position => { amounts[assetTypeFor(account.type, position.holding)] += account.amount * position.value / positionsTotal; });
+    positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => { amounts[type] += account.amount * position.value / positionsTotal * weight; }));
   });
   return amounts;
 }
@@ -119,7 +124,7 @@ function computeAssetCosts(accounts: Account[], sources: Array<{ holdings: Holdi
     const positionsTotal = positions.reduce((sum, position) => sum + position.value, 0);
     const accountCost = account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
     if (!positionsTotal) { costs[assetTypeFor(account.type)] += accountCost; return; }
-    positions.forEach(position => { costs[assetTypeFor(account.type, position.holding)] += accountCost * position.value / positionsTotal; });
+    positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => { costs[type] += accountCost * position.value / positionsTotal * weight; }));
   });
   return costs;
 }
