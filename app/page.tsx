@@ -245,7 +245,7 @@ export default function Home() {
   const [accounts, setAccounts] = useState<Account[]>(() => normalizeAccounts(initialAccounts));
   const [portfolios, setPortfolios] = useState<Portfolio[]>(initialPortfolios);
   const [activePortfolioId, setActivePortfolioId] = useState("kim-soobeom");
-  const [period, setPeriod] = useState<ReportPeriod>("최대");
+  const [period, setPeriod] = useState<ReportPeriod>("주");
   const [selectedTrendItems, setSelectedTrendItems] = useState<string[]>([]);
   const [selectedAssetTrendItems, setSelectedAssetTrendItems] = useState<string[]>([]);
   const [portfolioTrendCollapsed, setPortfolioTrendCollapsed] = useState(true);
