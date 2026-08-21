@@ -53,6 +53,7 @@ function isDomesticHolding(accountType: string, holding: Holding) {
 }
 
 function assetTypeFor(accountType: string, holding?: Holding) {
+  if (holding?.symbol === "CASH-KRW" || holding?.name === "예수금") return "채권·현금성";
   if (["005935.KS", "086790.KS", "293940.KS"].includes(holding?.symbol ?? "")) return "국내 주식";
   if (/msci\s*korea|korea\s*tr|(?:kodex|tiger)-msci-kr/i.test(`${holding?.name ?? ""} ${holding?.symbol ?? ""}`)) return "국내 주식";
   if (accountType === "코인") return "가상자산";

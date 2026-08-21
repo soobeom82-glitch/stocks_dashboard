@@ -496,14 +496,14 @@ export default function Home() {
     return snapshots.filter(snapshot => snapshot.date >= startDate);
   }, [period, snapshots]);
   const portfolioPeriodSnapshots = useMemo(() => periodSnapshots.map(snapshot => {
-    const hasAccountAmounts = portfolioAccounts.some(account => typeof snapshot.accountAmounts?.[String(account.id)] === "number");
+    const hasAccountBreakdown = Object.keys(snapshot.accountAmounts ?? {}).length > 0;
     const hasAccountCosts = portfolioAccounts.some(account => typeof snapshot.accountCosts?.[String(account.id)] === "number");
-    const amount = hasAccountAmounts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountAmounts?.[String(account.id)] ?? 0), 0) : snapshot.total;
+    const amount = hasAccountBreakdown ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountAmounts?.[String(account.id)] ?? 0), 0) : snapshot.total;
     const estimatedCost = portfolioAccounts.reduce((sum, account) => {
       const accountAmount = snapshot.accountAmounts?.[String(account.id)] ?? 0;
       return sum + (account.returnRate > -100 ? accountAmount / (1 + account.returnRate / 100) : 0);
     }, 0);
-    const cost = hasAccountCosts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0) : (snapshot.cost ?? estimatedCost);
+    const cost = hasAccountBreakdown || hasAccountCosts ? portfolioAccounts.reduce((sum, account) => sum + (snapshot.accountCosts?.[String(account.id)] ?? 0), 0) : (snapshot.cost ?? estimatedCost);
     return { ...snapshot, total: amount, cost };
   }), [periodSnapshots, portfolioAccounts]);
   const trendItems = useMemo(() => [
@@ -643,18 +643,6 @@ export default function Home() {
     setAccounts(current => current.map(account => account.id === 4 ? { ...account, amount: value, returnRate: cost > 0 ? (value / cost - 1) * 100 : 0 } : account));
     setIrpResetVersion(3);
   }, [hydrated, irpResetVersion]);
-  useEffect(() => {
-    if (!hydrated || total <= 0) return;
-    const date = todayKst();
-    const accountAmounts = Object.fromEntries(accounts.map(account => [String(account.id), account.amount]));
-    const assetAmounts = Object.fromEntries(assetAllocationByType.map(asset => [asset.type, asset.amount]));
-    const cost = total - totalProfit;
-    setSnapshots(current => {
-      const existing = current.find(snapshot => snapshot.date === date);
-      if (existing) return current.map(snapshot => snapshot.date === date ? { ...snapshot, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts } : snapshot);
-      return [...current, { date, total, cost, accountAmounts, accountCosts: currentAccountCosts, assetAmounts, assetCosts: currentAssetCosts, holdingAmounts: currentHoldingAmounts, holdingCosts: currentHoldingCosts }].sort((a, b) => a.date.localeCompare(b.date));
-    });
-  }, [accounts, assetAllocationByType, currentAccountCosts, currentAssetCosts, currentHoldingAmounts, currentHoldingCosts, hydrated, total, totalProfit]);
   useEffect(() => {
     if (!hydrated) return;
     const date = todayKst();

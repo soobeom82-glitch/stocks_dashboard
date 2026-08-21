@@ -13,6 +13,7 @@ const holdingKey = (accountId: number, holding: Holding) => `${accountId}:${hold
 const recentDates = (count: number) => Array.from({ length: count }, (_, index) => { const date = new Date(); date.setDate(date.getDate() - (count - 1 - index)); return KST_DATE(date); });
 
 function assetTypeFor(account: Account, holding?: Holding): AssetType {
+  if (holding?.symbol === "CASH-KRW" || holding?.name === "예수금") return "채권·현금성";
   if (account.type === "코인") return "가상자산";
   if (account.type === "펀드") return "펀드";
   if (holding?.assetClass === "현금성·금융상품") return "채권·현금성";
@@ -63,7 +64,6 @@ export async function backfillRecentSnapshots(count = 10) {
   const snapshots = new Map((state.snapshots ?? []).map(snapshot => [snapshot.date, snapshot]));
 
   dates.forEach(date => {
-    if (snapshots.has(date)) return;
     const exchangeRate = latestOnOrBefore(exchangeHistory, date, 1380);
     const accountAmounts: Record<string, number> = {};
     const accountCosts: Record<string, number> = {};
