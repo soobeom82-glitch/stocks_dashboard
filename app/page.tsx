@@ -10,7 +10,7 @@ import "./trend.css";
 
 type Portfolio = { id: string; name: string };
 type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string; portfolioId?: string };
-type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; market?: string; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
+type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; previousCloseDate?: string; quoteUpdatedAt?: string; market?: string; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
 type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Partial<Record<AssetType, number>>; assetCosts?: Partial<Record<AssetType, number>>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
 type ProfitPeak = { value: number; date: string };
@@ -76,9 +76,19 @@ const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+const signedAmount = (value: number) => `${value >= 0 ? "+" : ""}${won.format(value)}`;
+const formatQuoteTimestamp = (value: string) => new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value)).replace(/\.$/, "");
+const formatQuoteDate = (value: string) => value.replaceAll("-", ".");
+type PreviousComparison = { rate: number | null; amount: number | null; returnDelta: number | null };
 function PriorCloseRate({ rate }: { rate?: number | null }) {
   if (rate === undefined || rate === null) return null;
   return <small className={rate >= 0 ? "valuation-daily-rate positive" : "valuation-daily-rate negative"}>({percent(rate)})</small>;
+}
+function PreviousComparisonNote({ comparison, metric }: { comparison?: PreviousComparison | null; metric: "amount" | "return" | "profit" }) {
+  if (!comparison || comparison.rate === null) return null;
+  if (metric === "amount") return <small className={comparison.rate >= 0 ? "comparison-note positive" : "comparison-note negative"}>이전 거래일 대비 {comparison.amount === null ? percent(comparison.rate) : `${signedAmount(comparison.amount)} · ${percent(comparison.rate)}`}</small>;
+  if (metric === "return") return <small className={(comparison.returnDelta ?? 0) >= 0 ? "comparison-note positive" : "comparison-note negative"}>이전 거래일 대비 {(comparison.returnDelta ?? 0) >= 0 ? "+" : ""}{(comparison.returnDelta ?? 0).toFixed(2)}%p</small>;
+  return <small className={(comparison.amount ?? 0) >= 0 ? "comparison-note positive" : "comparison-note negative"}>이전 거래일 대비 {comparison.amount === null ? "-" : signedAmount(comparison.amount)}</small>;
 }
 const accountLabel = (name: string) => name.replace(/\s*[·ㆍ]\s*\d[\d-]*$/u, "");
 const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name}`;
@@ -220,6 +230,13 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
     : isKrwStock ? "등록된 보유 수량과 평단가를 기준으로 현재가 손익과 수익률을 계산합니다."
     : isCoin ? "업비트 KRW 마켓 현재가를 6시간마다 갱신하며, 버튼으로 즉시 다시 조회할 수 있습니다."
     : "상장 ETF·주식은 현재가를 표시하고, 예금·보험·디폴트옵션은 마지막 등록 평가금액을 유지합니다.";
+  const quoteBasis = (() => {
+    const comparable = positions.filter(holding => holding.previousClose && holding.previousCloseDate && holding.quoteUpdatedAt);
+    if (!comparable.length) return null;
+    const dates = [...new Set(comparable.map(holding => formatQuoteDate(holding.previousCloseDate!)))];
+    const latest = comparable.map(holding => holding.quoteUpdatedAt!).sort().at(-1);
+    return `비교 기준 · 이전 거래일 종가 ${dates.join(" · ")} → 현재가 ${latest ? formatQuoteTimestamp(latest) : ""}`;
+  })();
   const accountTrendId = `account-total-${account.id}`;
   const holdingTrendItems: TrendSeries[] = [
     { id: accountTrendId, name: "계좌 합산", color: colorHex[account.color] ?? "#5666df", currentCost: account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0, snapshots: snapshots.flatMap(snapshot => { const amount = snapshot.accountAmounts?.[String(account.id)]; return typeof amount === "number" ? [{ date: snapshot.date, total: amount, cost: snapshot.accountCosts?.[String(account.id)] }] : []; }) },
@@ -248,6 +265,7 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
   return <div className="account-expanded">
     <div className="detail-head"><div><p className="eyebrow">{label}</p><h3>{title}</h3></div>{!isFund && <button className="text-button" onClick={event => { event.stopPropagation(); void refresh(); }}>현재가 새로고침 {updatedAt && `· ${updatedAt}`}</button>}</div>
     <p className="holdings-note">{note}</p>
+    {quoteBasis && <p className="quote-basis">{quoteBasis}</p>}
     {(isIrp || contributionLimits.length > 0) && <section className="account-limit-summary"><div className="limit-summary-head"><p className="eyebrow">ACCOUNT LIMITS</p><span>2026년 기준</span></div><div className="limit-summary-grid">{isIrp && <div className="limit-metric"><span>위험자산 비중</span><strong className={irpRiskyRate <= 70 ? "limit-ok" : "limit-alert"}>{irpRiskyRate.toFixed(1)}% <small>/ 70.0%</small></strong><small>ETF·주식 {won.format(irpRiskyAmount)}</small></div>}{contributionLimits.map(item => <div className="limit-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div><p>{["연금저축", "IRP"].includes(account.type) ? "연금저축 CMA의 올해 납입금액 600만원을 반영했습니다. IRP 납입액을 추가하면 합산 잔여 한도가 자동 갱신됩니다." : "납입 잔여 한도는 납입 내역을 등록하면 계산해 표시합니다."}</p></section>}
     <section className="account-holding-trend"><div className="detail-head"><div><p className="eyebrow">HOLDING PERFORMANCE</p><h4>보유 종목 추이</h4></div></div><p className="holdings-note">아래 보유 종목 행을 클릭하면 그래프에 추가됩니다. 선택하지 않으면 계좌 합산 추이를 표시합니다.</p><div className="trend-series-list"><TrendChart series={visibleHoldingTrendItems} stackSeries={selectedHoldingTrendItems.length ? selectedHoldingTrendItems : holdingTrendItems.slice(1)} showLegend={false} /></div></section>
     {positions.length === 0 ? <div className="empty-holdings">등록된 {isCoin ? "코인 보유자산" : "보유 종목"}이 없습니다.</div> : groups.map(group => <div className="holding-group" key={group.assetClass}>{isIrp && <h4>{group.assetClass}</h4>}<div className="holding-table"><div><span>{isCoin ? "코인" : isIrp ? "상품" : "종목"}</span><span>보유 수량</span><span>매입금액</span><span>평가금액</span><span>평가손익</span><span>수익률</span></div>{group.positions.map(holding => {
@@ -307,9 +325,11 @@ export default function Home() {
   const accountsByValue = useMemo(() => [...portfolioAccounts].sort((a, b) => b.amount - a.amount), [portfolioAccounts]);
   const dailyValuations = useMemo(() => {
     const accountRates = new Map<number, number | null>();
+    const accountComparisons = new Map<number, PreviousComparison>();
     const assetRates = new Map<AssetType, number | null>();
     const assetAccountRates = new Map<string, number | null>();
     const holdingRates = new Map<string, number | null>();
+    const holdingComparisons = new Map<string, PreviousComparison>();
     const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
       { positions: holdings, exchangeRate: 1 }, { positions: usdHoldings, exchangeRate: usdKrwRate }, { positions: fundHoldings, exchangeRate: 1 },
       { positions: coinHoldings, exchangeRate: 1 }, { positions: pensionHoldings, exchangeRate: 1 }, { positions: isaHoldings, exchangeRate: 1 }, { positions: irpHoldings, exchangeRate: 1 },
@@ -320,7 +340,11 @@ export default function Home() {
       const current = holding.quantity * holding.fallbackPrice * exchangeRate;
       const hasComparison = typeof holding.previousClose === "number" && holding.previousClose > 0;
       const previous = holding.quantity * (hasComparison ? holding.previousClose! : holding.fallbackPrice) * exchangeRate;
-      holdingRates.set(holdingSnapshotKey(holding.accountId, holding), hasComparison && previous > 0 ? (current / previous - 1) * 100 : null);
+      const rate = hasComparison && previous > 0 ? (current / previous - 1) * 100 : null;
+      const cost = holding.quantity * holding.averagePrice * exchangeRate;
+      const previousReturn = rate !== null && cost > 0 ? (previous / cost - 1) * 100 : null;
+      holdingRates.set(holdingSnapshotKey(holding.accountId, holding), rate);
+      holdingComparisons.set(holdingSnapshotKey(holding.accountId, holding), { rate, amount: rate === null ? null : current - previous, returnDelta: previousReturn === null ? null : (current / cost - 1) * 100 - previousReturn });
       const entries = byAccount.get(holding.accountId) ?? [];
       entries.push({ holding, current, previous, hasComparison });
       byAccount.set(holding.accountId, entries);
@@ -337,6 +361,9 @@ export default function Home() {
       const previous = rawCurrent > 0 ? rawPrevious * scale : account.amount;
       const rate = hasComparison && previous > 0 ? (account.amount / previous - 1) * 100 : null;
       accountRates.set(account.id, rate);
+      const accountCost = account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
+      const previousReturn = rate !== null && accountCost > 0 ? (previous / accountCost - 1) * 100 : null;
+      accountComparisons.set(account.id, { rate, amount: rate === null ? null : account.amount - previous, returnDelta: previousReturn === null ? null : account.returnRate - previousReturn });
       totalPrevious += previous;
       hasTotalComparison ||= hasComparison;
       if (!entries.length) {
@@ -365,8 +392,20 @@ export default function Home() {
       });
     });
     assetTotals.forEach((value, type) => assetRates.set(type, value.hasComparison && value.previous > 0 ? (value.current / value.previous - 1) * 100 : null));
-    return { totalRate: hasTotalComparison && totalPrevious > 0 ? (total / totalPrevious - 1) * 100 : null, accountRates, assetRates, assetAccountRates, holdingRates };
-  }, [portfolioAccounts, total, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+    const totalRate = hasTotalComparison && totalPrevious > 0 ? (total / totalPrevious - 1) * 100 : null;
+    const totalCost = total - totalProfit;
+    const previousReturn = totalRate !== null && totalCost > 0 ? (totalPrevious / totalCost - 1) * 100 : null;
+    const totalComparison: PreviousComparison = { rate: totalRate, amount: totalRate === null ? null : total - totalPrevious, returnDelta: previousReturn === null ? null : weightedReturn - previousReturn };
+    return { totalRate, totalComparison, accountRates, accountComparisons, assetRates, assetAccountRates, holdingRates, holdingComparisons };
+  }, [portfolioAccounts, total, totalProfit, weightedReturn, holdings, usdHoldings, usdKrwRate, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
+  const portfolioQuoteBasis = useMemo(() => {
+    const accountIds = new Set(portfolioAccounts.map(account => account.id));
+    const comparable = [holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings].flat().filter(holding => accountIds.has(holding.accountId ?? -1) && holding.previousClose && holding.previousCloseDate && holding.quoteUpdatedAt);
+    if (!comparable.length) return null;
+    const dates = [...new Set(comparable.map(holding => formatQuoteDate(holding.previousCloseDate!)))];
+    const latest = comparable.map(holding => holding.quoteUpdatedAt!).sort().at(-1);
+    return `이전 거래일 종가 ${dates.join(" · ")} → 현재가 ${latest ? formatQuoteTimestamp(latest) : ""}`;
+  }, [portfolioAccounts, holdings, usdHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings]);
   const assetAllocationByType = useMemo(() => {
     const sources: Array<{ positions: Holding[]; exchangeRate: number }> = [
       { positions: holdings, exchangeRate: 1 }, { positions: usdHoldings, exchangeRate: usdKrwRate }, { positions: fundHoldings, exchangeRate: 1 },
@@ -570,21 +609,21 @@ export default function Home() {
     if (!items.length) { setNotice("현재가를 반영할 보유 종목이 없습니다."); return; }
     try {
       const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(items.filter(item => item.symbol.endsWith(".KS")).map(item => item.symbol).join(","))}&fields=previous-close-v1`, { cache: "no-store" });
-      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
+      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; previousCloseDates?: Record<string, string>; fetchedAt?: string };
       if (!data.quotes) throw new Error("No quotes");
-      setter(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose })); updateStockAccounts(type, next); return next; });
-      setUpdated(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
+      setter(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose, previousCloseDate: data.previousCloseDates?.[holding.symbol] ?? holding.previousCloseDate, quoteUpdatedAt: data.fetchedAt ?? holding.quoteUpdatedAt })); updateStockAccounts(type, next); return next; });
+      setUpdated(data.fetchedAt ? formatQuoteTimestamp(data.fetchedAt) : new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("현재가를 불러오지 못했습니다. 마지막 확인 가격으로 계산합니다."); }
   };
   const refreshUsdPrices = async () => {
     if (!usdHoldings.length) { setNotice("현재가를 반영할 미국 주식 보유 종목이 없습니다."); return; }
     try {
       const response = await fetch(`/api/quotes?includeExchangeRate=1&symbols=${encodeURIComponent(usdHoldings.map(item => item.symbol).join(","))}&fields=previous-close-v1`, { cache: "no-store" });
-      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; exchangeRate?: number | null };
+      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; previousCloseDates?: Record<string, string>; exchangeRate?: number | null; fetchedAt?: string };
       if (!data.quotes || !data.exchangeRate) throw new Error("No quotes");
       setUsdKrwRate(data.exchangeRate);
-      setUsdHoldings(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose })); updateStockAccounts("미국 주식", next, data.exchangeRate!); return next; });
-      setUsdQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
+      setUsdHoldings(current => { const next = current.map(holding => ({ ...holding, fallbackPrice: data.quotes?.[holding.symbol] ?? holding.fallbackPrice, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose, previousCloseDate: data.previousCloseDates?.[holding.symbol] ?? holding.previousCloseDate, quoteUpdatedAt: data.fetchedAt ?? holding.quoteUpdatedAt })); updateStockAccounts("미국 주식", next, data.exchangeRate!); return next; });
+      setUsdQuoteUpdatedAt(data.fetchedAt ? formatQuoteTimestamp(data.fetchedAt) : new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("미국 주식 현재가 또는 환율을 불러오지 못했습니다. 마지막 확인 값으로 계산합니다."); }
   };
   const refreshCoinPrices = async () => {
@@ -592,18 +631,19 @@ export default function Home() {
     try {
       const marketFor = (holding: Holding) => holding.market ?? `KRW-${holding.symbol}`;
       const response = await fetch(`/api/crypto-quotes?markets=${encodeURIComponent(coinHoldings.map(marketFor).join(","))}`, { cache: "no-store" });
-      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
+      const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; fetchedAt?: string };
       if (!data.quotes) throw new Error("No quotes");
       setCoinHoldings(current => {
         const next = current.map(holding => ({
           ...holding,
           fallbackPrice: data.quotes?.[marketFor(holding)] ?? holding.fallbackPrice,
           previousClose: data.previousCloses?.[marketFor(holding)] ?? holding.previousClose,
+          quoteUpdatedAt: data.fetchedAt ?? holding.quoteUpdatedAt,
         }));
         updateStockAccounts("코인", next);
         return next;
       });
-      setCoinQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
+      setCoinQuoteUpdatedAt(data.fetchedAt ? formatQuoteTimestamp(data.fetchedAt) : new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }));
     } catch { setNotice("코인 현재가를 불러오지 못했습니다. 마지막 확인 가격으로 계산합니다."); }
   };
   useEffect(() => {
@@ -615,7 +655,7 @@ export default function Home() {
   const refreshIrpPrices = async () => {
     const symbols = irpHoldings.filter(item => item.assetClass === "ETF·주식" && item.symbol.endsWith(".KS")).map(item => item.symbol);
     if (!symbols.length) { setNotice("현재가를 반영할 IRP ETF가 없습니다."); return; }
-    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}&fields=previous-close-v1`, { cache: "no-store" }); const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
+    try { const response = await fetch(`/api/quotes?symbols=${encodeURIComponent(symbols.join(","))}&fields=previous-close-v1`, { cache: "no-store" }); const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number>; previousCloseDates?: Record<string, string>; fetchedAt?: string }; if (!data.quotes) throw new Error("No quotes"); setIrpHoldings(current => { const next = current.map(holding => { const price = data.quotes?.[holding.symbol]; return price ? { ...holding, fallbackPrice: price, marketPrice: price, previousClose: data.previousCloses?.[holding.symbol] ?? holding.previousClose, previousCloseDate: data.previousCloseDates?.[holding.symbol] ?? holding.previousCloseDate, quoteUpdatedAt: data.fetchedAt ?? holding.quoteUpdatedAt } : holding; }); updateStockAccounts("IRP", next); return next; }); setIrpQuoteUpdatedAt(data.fetchedAt ? formatQuoteTimestamp(data.fetchedAt) : new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })); } catch { setNotice("IRP ETF 현재가를 불러오지 못했습니다. 마지막 확인 가격을 유지합니다."); }
   };
   useEffect(() => { if (holdings.length) void refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt); }, [holdings.length]);
   useEffect(() => { if (usdHoldings.length) void refreshUsdPrices(); }, [usdHoldings.length]);
@@ -700,11 +740,11 @@ export default function Home() {
     <header className="topbar"><div className="brand"><span className="brand-mark">P</span><span>포트폴리오</span></div><div className="topbar-actions"><label className="portfolio-select"><span>포트폴리오</span><select value={activePortfolio?.id ?? ""} onChange={event => { setActivePortfolioId(event.target.value); setExpandedAccountId(null); setSelectedTrendItems([]); setSelectedAssetTrendItems([]); setSelectedAssetType(null); }} aria-label="표시할 포트폴리오 선택">{portfolios.map(portfolio => <option key={portfolio.id} value={portfolio.id}>{portfolio.name}</option>)}</select></label><button className="profile">{activePortfolio?.name.slice(-2) ?? "SB"}</button></div></header>
     <section className="hero"><div><p className="eyebrow">{activePortfolio?.name ?? "포트폴리오"} · KRW</p><h1>{activePortfolio?.name ?? "내"} 자산, 한눈에.</h1><p className="hero-copy">이 포트폴리오에 연결된 계좌와 연금·펀드·코인의 성과를 확인하세요.</p></div></section>
     {notice && <div className="notice">{notice}<button onClick={() => setNotice("")}>닫기</button></div>}
-    <section className="metrics"><article className="metric-card main-metric"><p>통합 평가자산</p><strong className="valuation-amount">{won.format(total)}<PriorCloseRate rate={dailyValuations.totalRate} /></strong><span>등록된 보유 종목 기준</span></article><article className="metric-card"><p>통합 수익률</p><strong>{total > 0 ? percent(weightedReturn) : "-"}</strong><span>매입금액 대비</span></article><article className="metric-card"><p>운용 계좌</p><strong>{portfolioAccounts.filter(account => account.amount > 0).length}<small>개</small></strong><span>{activePortfolio?.name ?? "선택"} 포트폴리오</span></article><article className="metric-card"><p>수익금</p><strong className={totalProfit >= 0 ? "positive" : "negative"}>{total > 0 ? `${totalProfit >= 0 ? "+" : ""}${won.format(totalProfit)}` : "-"}</strong><span>매입금액 대비 평가손익</span></article></section>
+    <section className="metrics"><article className="metric-card main-metric"><p>통합 평가자산</p><strong className="valuation-amount">{won.format(total)}<PriorCloseRate rate={dailyValuations.totalRate} /></strong><PreviousComparisonNote comparison={dailyValuations.totalComparison} metric="amount" /><span>{portfolioQuoteBasis ?? "현재가 비교 기준 생성 중"}</span></article><article className="metric-card"><p>통합 수익률</p><strong>{total > 0 ? percent(weightedReturn) : "-"}</strong><PreviousComparisonNote comparison={dailyValuations.totalComparison} metric="return" /></article><article className="metric-card"><p>운용 계좌</p><strong>{portfolioAccounts.filter(account => account.amount > 0).length}<small>개</small></strong><span>{activePortfolio?.name ?? "선택"} 포트폴리오</span></article><article className="metric-card"><p>수익금</p><strong className={totalProfit >= 0 ? "positive" : "negative"}>{total > 0 ? `${totalProfit >= 0 ? "+" : ""}${won.format(totalProfit)}` : "-"}</strong><PreviousComparisonNote comparison={dailyValuations.totalComparison} metric="profit" /></article></section>
     <PerformancePanel title="통합 자산 추이" period={period} onPeriodChange={setPeriod} items={trendItems} aggregateSeries={aggregateAccountTrend} selectedItems={selectedTrendItems} onToggleItem={toggleTrendItem} collapsed={portfolioTrendCollapsed} onToggleCollapsed={() => setPortfolioTrendCollapsed(current => !current)} pickerLabel="그래프에 표시할 계좌" pickerMode="below" valuationDailyRate={dailyValuations.totalRate} itemDailyRates={new Map(trendItems.map(item => [item.id, dailyValuations.accountRates.get(Number(item.id.replace("account-", ""))) ?? null]))} />
     <PerformancePanel title="자산 유형별 추이" period={period} onPeriodChange={setPeriod} items={assetTrendItems} aggregateSeries={aggregateAssetTrend} selectedItems={selectedAssetTrendItems} onToggleItem={toggleAssetTrendItem} collapsed={assetTrendCollapsed} onToggleCollapsed={() => setAssetTrendCollapsed(current => !current)} pickerLabel="그래프에 표시할 자산 유형" pickerMode="below" pickerColumnLabel="자산 유형" valuationDailyRate={dailyValuations.totalRate} itemDailyRates={new Map(assetTrendItems.map(item => [item.id, dailyValuations.assetRates.get(item.id.replace("asset-", "") as AssetType) ?? null]))} />
     <section className="panel asset-allocation-panel"><div className="panel-head"><div><p className="eyebrow">ASSET ALLOCATION</p><h2>자산 유형별 비중</h2></div></div><p className="account-hint">계좌가 아닌 보유 종목·상품의 성격을 기준으로 합산합니다. 유형을 클릭하면 계좌와 종목을 볼 수 있습니다.</p><div className="asset-allocation-body"><div className="donut" style={{ background: `conic-gradient(${assetAllocationGradient})` }}><div><strong>{assetAllocationByType.length}</strong><span>자산 유형</span></div></div><div className="legend asset-legend">{assetAllocationByType.map(item => <button key={item.type} className={selectedAssetType === item.type ? "selected" : ""} onClick={() => setSelectedAssetType(current => current === item.type ? null : item.type)} aria-expanded={selectedAssetType === item.type}><i className={item.color}/><span>{item.type}</span><b>{total > 0 ? (item.amount / total * 100).toFixed(1) : "0.0"}%</b><small>›</small></button>)}</div></div>{selectedAssetType && selectedAssetDetails && <div className="asset-detail"><div className="asset-detail-head"><div><p className="eyebrow">{selectedAssetType.toUpperCase()}</p><h3>{selectedAssetType} 상세</h3></div><button onClick={() => setSelectedAssetType(null)}>닫기</button></div><div className="asset-detail-grid"><div><h4>포함 계좌</h4><div className="asset-detail-list asset-metric-list"><div className="asset-metric-heading"><span>계좌</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{[...selectedAssetDetails.accounts.entries()].sort((a, b) => b[1] - a[1]).map(([accountId, amount]) => { const account = accounts.find(item => item.id === accountId); if (!account) return null; const profit = account.returnRate > -100 ? amount - amount / (1 + account.returnRate / 100) : 0; return <div className="asset-metric-row" key={accountId}><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span><strong className="valuation-amount">{won.format(amount)}<PriorCloseRate rate={dailyValuations.assetAccountRates.get(`${selectedAssetType}:${accountId}`)} /></strong><strong className={account.returnRate >= 0 ? "positive" : "negative"}>{percent(account.returnRate)}</strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><strong>{total > 0 ? (amount / total * 100).toFixed(1) : "0.0"}%</strong></div>; })}</div></div><div><h4>보유 종목</h4><div className="asset-detail-list asset-metric-list">{selectedAssetDetails.holdings.length ? <><div className="asset-metric-heading"><span>종목</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{[...selectedAssetDetails.holdings].sort((a, b) => b.value - a.value).map(({ account, holding, value }) => { const cost = holding.fallbackPrice > 0 ? value * holding.averagePrice / holding.fallbackPrice : 0; const profit = value - cost; const rate = cost > 0 ? (value / cost - 1) * 100 : 0; return <div className="asset-metric-row" key={`${account.id}-${holding.symbol}-${holding.name}`}><span><b>{holding.name}</b><small>{accountLabel(account.name)} · {holding.symbol}</small><PriorCloseRate rate={dailyValuations.holdingRates.get(holdingSnapshotKey(account.id, holding))} /></span><strong>{won.format(value)}</strong><strong className={rate >= 0 ? "positive" : "negative"}>{percent(rate)}</strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><strong>{total > 0 ? (value / total * 100).toFixed(1) : "0.0"}%</strong></div>; })}</> : <p className="asset-empty">등록된 종목 정보가 없습니다.</p>}</div></div></div></div>}</section>
     <section className="panel domestic-top-panel"><div className="panel-head"><div><p className="eyebrow">DOMESTIC EQUITY TOP 3</p><h2>국내 주식 보유금액 Top 3</h2></div><span className="domestic-total">평가금액 기준</span></div><p className="account-hint">여러 계좌에 겹쳐 보유한 동일 종목은 합산합니다. 평가금액 고점을 매일 기록합니다.</p>{domesticTopThree.items.length ? <div className="domestic-top-chart"><div className="domestic-top-heading"><span>종목</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>고점 대비</span></div>{domesticTopThree.items.map((item, index) => { const profit = item.value - item.cost; const rate = item.cost > 0 ? (item.value / item.cost - 1) * 100 : 0; const dailyRate = item.hasComparison && item.previous > 0 ? (item.value / item.previous - 1) * 100 : null; const peak = profitPeaks[item.symbol || item.name]; const drawdown = peak && peak.value > 0 ? (item.value / peak.value - 1) * 100 : null; return <div className="domestic-top-row" key={item.symbol || item.name}><span className="domestic-rank">{index + 1}</span><div className="domestic-name"><b>{item.name}</b><small>{item.symbol} · {item.quantity.toLocaleString("ko-KR")}주 · {[...item.accountNames].join(", ")}</small><PriorCloseRate rate={dailyRate} /></div><div className="domestic-value"><strong>{won.format(item.value)}</strong></div><div className={`domestic-rate ${rate >= 0 ? "positive" : "negative"}`}>{percent(rate)}</div><div className={`domestic-profit ${profit >= 0 ? "positive" : "negative"}`}>{profit >= 0 ? "+" : ""}{won.format(profit)}</div><div className={`domestic-peak ${drawdown !== null && drawdown < 0 ? "drawdown" : "at-peak"}`}>{drawdown === null ? "기록 대기" : drawdown < 0 ? `${drawdown.toFixed(1)}%` : "최고"}</div></div>; })}</div> : <div className="empty-holdings">국내 주식 보유 종목을 등록하면 상위 3개가 표시됩니다.</div>}</section>
-    <section className="accounts-section"><div className="panel-head"><div><p className="eyebrow">ACCOUNTS</p><h2>계좌별 자산</h2></div></div><p className="account-hint">평가금액이 큰 계좌부터 표시됩니다. 계좌를 클릭하면 보유자산 상세와 현재가를 확인할 수 있습니다.</p><div className="account-table"><div className="table-heading"><span>계좌</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{accountsByValue.map(account => { const details = detailsFor(account); const profit = account.returnRate > -100 ? account.amount - account.amount / (1 + account.returnRate / 100) : 0; const holdingSelection = selectedHoldingTrendItems[account.id] ?? []; const toggleHoldingTrendItem = (id: string) => setSelectedHoldingTrendItems(current => { const selected = current[account.id] ?? []; return { ...current, [account.id]: selected.includes(id) ? selected.filter(item => item !== id) : [...selected, id] }; }); return <div className="account-item" key={account.id}><div className={`account-row ${expandedAccountId === account.id ? "expanded" : ""}`} role="button" tabIndex={0} onClick={() => setExpandedAccountId(current => current === account.id ? null : account.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedAccountId(current => current === account.id ? null : account.id); } }}><div><span className={`account-icon ${account.color}`}>{account.type.slice(0, 1)}</span><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span></div><strong className="valuation-amount">{won.format(account.amount)}<PriorCloseRate rate={dailyValuations.accountRates.get(account.id)} /></strong><strong className={account.returnRate >= 0 ? "positive" : "negative"}>{percent(account.returnRate)}</strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}</strong><div className="weight"><i><em style={{ width: `${total > 0 ? account.amount / total * 100 : 0}%` }}/></i><span>{total > 0 ? (account.amount / total * 100).toFixed(1) : "0.0"}%</span></div></div>{expandedAccountId === account.id && <AccountDetails account={account} {...details} snapshots={periodSnapshots} selectedTrendItems={holdingSelection} onToggleTrendItem={toggleHoldingTrendItem} />}</div>; })}</div></section>
+    <section className="accounts-section"><div className="panel-head"><div><p className="eyebrow">ACCOUNTS</p><h2>계좌별 자산</h2></div></div><p className="account-hint">평가금액이 큰 계좌부터 표시됩니다. 계좌를 클릭하면 보유자산 상세와 현재가를 확인할 수 있습니다.</p><div className="account-table"><div className="table-heading"><span>계좌</span><span>평가금액</span><span>수익률</span><span>평가손익</span><span>비중</span></div>{accountsByValue.map(account => { const details = detailsFor(account); const profit = account.returnRate > -100 ? account.amount - account.amount / (1 + account.returnRate / 100) : 0; const comparison = dailyValuations.accountComparisons.get(account.id); const holdingSelection = selectedHoldingTrendItems[account.id] ?? []; const toggleHoldingTrendItem = (id: string) => setSelectedHoldingTrendItems(current => { const selected = current[account.id] ?? []; return { ...current, [account.id]: selected.includes(id) ? selected.filter(item => item !== id) : [...selected, id] }; }); return <div className="account-item" key={account.id}><div className={`account-row ${expandedAccountId === account.id ? "expanded" : ""}`} role="button" tabIndex={0} onClick={() => setExpandedAccountId(current => current === account.id ? null : account.id)} onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setExpandedAccountId(current => current === account.id ? null : account.id); } }}><div><span className={`account-icon ${account.color}`}>{account.type.slice(0, 1)}</span><span><b>{accountLabel(account.name)}</b><small>{account.broker}</small></span></div><strong className="valuation-amount">{won.format(account.amount)}<PriorCloseRate rate={comparison?.rate} /></strong><strong className={account.returnRate >= 0 ? "positive" : "negative"}>{percent(account.returnRate)}<PreviousComparisonNote comparison={comparison} metric="return" /></strong><strong className={profit >= 0 ? "positive" : "negative"}>{profit >= 0 ? "+" : ""}{won.format(profit)}<PreviousComparisonNote comparison={comparison} metric="profit" /></strong><div className="weight"><i><em style={{ width: `${total > 0 ? account.amount / total * 100 : 0}%` }}/></i><span>{total > 0 ? (account.amount / total * 100).toFixed(1) : "0.0"}%</span></div></div>{expandedAccountId === account.id && <AccountDetails account={account} {...details} snapshots={periodSnapshots} selectedTrendItems={holdingSelection} onToggleTrendItem={toggleHoldingTrendItem} />}</div>; })}</div></section>
   </main>;
 }
