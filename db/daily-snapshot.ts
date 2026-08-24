@@ -9,7 +9,7 @@ const number = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const signed = (value: number) => `${value >= 0 ? "+" : ""}${number.format(value)}`;
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 
-function telegramReport(state: PortfolioState, accounts: Account[], date: string) {
+function telegramReports(state: PortfolioState, accounts: Account[], date: string) {
   const names = new Map([["kim-soobeom", "김수범"], ["kim-seoha", "김서하"], ["kim-eunho", "김은호"]]);
   state.portfolios?.forEach(portfolio => names.set(portfolio.id, portfolio.name));
   const groups = new Map<string, { amount: number; cost: number }>();
@@ -20,24 +20,27 @@ function telegramReport(state: PortfolioState, accounts: Account[], date: string
     group.cost += account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
     groups.set(id, group);
   });
-  const total = accounts.reduce((sum, account) => sum + account.amount, 0);
-  const cost = accounts.reduce((sum, account) => sum + (account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0), 0);
-  const summary = ["📊 포트폴리오 일일 스냅샷", `${date} KST`, "", `통합 평가금액  ${number.format(total)}원`, `통합 수익률  ${cost > 0 ? percent((total / cost - 1) * 100) : "-"}`, `평가손익  ${signed(total - cost)}원`, "", "포트폴리오별"];
-  const details = [...groups.entries()].map(([id, group]) => `${names.get(id) ?? id}\n평가금액 ${number.format(group.amount)}원 · 수익률 ${group.cost > 0 ? percent((group.amount / group.cost - 1) * 100) : "-"} · 손익 ${signed(group.amount - group.cost)}원`);
-  return [...summary, ...details].join("\n");
+  return [...groups.entries()].map(([id, group]) => [
+    `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
+    `${date} KST`,
+    "",
+    `평가금액  ${number.format(group.amount)}원`,
+    `수익률  ${group.cost > 0 ? percent((group.amount / group.cost - 1) * 100) : "-"}`,
+    `평가손익  ${signed(group.amount - group.cost)}원`,
+  ].join("\n"));
 }
 
-async function sendTelegramReport(message: string) {
+async function sendTelegramReports(messages: string[]) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chatId) return false;
-  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const results = await Promise.all(messages.map(message => fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text: message, disable_web_page_preview: true }),
     cache: "no-store",
-  });
-  return response.ok;
+  })));
+  return results.every(response => response.ok);
 }
 
 async function quote(symbol: string): Promise<number | null> {
@@ -228,7 +231,7 @@ export async function saveDailyPortfolioSnapshot() {
   await saveDashboardState(payload);
   if (state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
   try {
-    const sent = await sendTelegramReport(telegramReport(state, accounts, date));
+    const sent = await sendTelegramReports(telegramReports(state, accounts, date));
     if (!sent) return { telegramReport: "failed" as const };
     await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: date }));
     return { telegramReport: "sent" as const };
