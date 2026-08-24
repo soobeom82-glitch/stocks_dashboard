@@ -1,4 +1,4 @@
-type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; accountId?: number; assetClass?: string; marketPrice?: number };
+type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; market?: string; accountId?: number; assetClass?: string; marketPrice?: number };
 type Account = { id: number; type: string; amount: number; returnRate: number; portfolioId?: string };
 type ProfitPeak = { profit: number; date: string };
 type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
@@ -123,14 +123,30 @@ async function refreshStockPrices(holdings: Holding[], exchangeRate = 1) {
 
 async function refreshCoinPrices(holdings: Holding[]) {
   if (!holdings.length) return holdings;
-  const markets = holdings.map(holding => `KRW-${holding.symbol}`).join(",");
-  const response = await fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets)}`, { next: { revalidate: 21600 } });
-  if (!response.ok) return holdings;
-  const data = await response.json() as Array<{ market: string; trade_price: number; prev_closing_price?: number }>;
-  const prices = Object.fromEntries(data.map(item => [item.market, item]));
+  const upbitHoldings = holdings.filter(holding => !holding.market);
+  const okxHoldings = holdings.filter(holding => holding.market?.startsWith("OKX:"));
+  const [upbit, okx, usdQuote] = await Promise.all([
+    upbitHoldings.length ? fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(upbitHoldings.map(holding => `KRW-${holding.symbol}`).join(","))}`, { next: { revalidate: 21600 } }) : null,
+    Promise.all(okxHoldings.map(async holding => [holding.market!, await fetch(`https://www.okx.com/api/v5/market/ticker?instId=${encodeURIComponent(holding.market!.slice(4))}`, { next: { revalidate: 21600 } })] as const)),
+    quote("KRW=X"),
+  ]);
+  const prices: Record<string, { price: number; previousClose?: number }> = {};
+  if (upbit?.ok) {
+    const data = await upbit.json() as Array<{ market: string; trade_price: number; prev_closing_price?: number }>;
+    data.forEach(item => { prices[item.market] = { price: item.trade_price, previousClose: item.prev_closing_price }; });
+  }
+  const exchangeRate = usdQuote?.price ?? 1380;
+  await Promise.all(okx.map(async ([market, response]) => {
+    if (!response.ok) return;
+    const data = await response.json() as { data?: Array<{ last?: string; open24h?: string }> };
+    const item = data.data?.[0];
+    const price = Number(item?.last);
+    const previousClose = Number(item?.open24h);
+    if (Number.isFinite(price) && price > 0) prices[market] = { price: price * exchangeRate, previousClose: Number.isFinite(previousClose) && previousClose > 0 ? previousClose * exchangeRate : undefined };
+  }));
   return holdings.map(holding => {
-    const latest = prices[`KRW-${holding.symbol}`];
-    return latest ? { ...holding, fallbackPrice: latest.trade_price, previousClose: latest.prev_closing_price ?? holding.previousClose } : holding;
+    const latest = prices[holding.market ?? `KRW-${holding.symbol}`];
+    return latest ? { ...holding, fallbackPrice: latest.price, previousClose: latest.previousClose ?? holding.previousClose } : holding;
   });
 }
 

@@ -10,7 +10,7 @@ import "./trend.css";
 
 type Portfolio = { id: string; name: string };
 type Account = { id: number; type: string; broker: string; name: string; amount: number; returnRate: number; color: string; portfolioId?: string };
-type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
+type Holding = { symbol: string; name: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; market?: string; accountId?: number; unit?: string; assetClass?: "ETF·주식" | "현금성·금융상품"; marketPrice?: number };
 type ScreenshotImport = { id: number; accountId: number; fileName: string; createdAt: string; status: "추출 대기" | "검토 필요"; summary?: string };
 type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Partial<Record<AssetType, number>>; assetCosts?: Partial<Record<AssetType, number>>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
 type ProfitPeak = { value: number; date: string };
@@ -57,6 +57,9 @@ const eunhoPensionHoldings: Holding[] = [
   ["379780.KS", "RISE 미국S&P500", 17, 21538, 395234],
   ["411060.KS", "ACE KRX금현물", 237, 28585, 6457335],
 ].map(([symbol, name, quantity, averagePrice, value]) => ({ symbol: String(symbol), name: String(name), quantity: Number(quantity), averagePrice: Number(averagePrice), fallbackPrice: Number(value) / Number(quantity), accountId: 11 } as Holding)).concat({ symbol: "CASH-KRW", name: "예수금", quantity: 1, averagePrice: 430275, fallbackPrice: 430275, accountId: 11, unit: "원" });
+const okxGramAccount: Account = { id: 12, type: "코인", broker: "OKX", name: "OKX GRAM 계좌", amount: 801869, returnRate: 0, color: "blue", portfolioId: "kim-soobeom" };
+// 스크린샷에는 매입단가와 손익이 표시되지 않아, 등록 시점 현재가를 기준값으로 기록합니다.
+const okxGramHolding: Holding = { symbol: "GRAM", name: "GRAM", quantity: 390, averagePrice: 2056.0756, fallbackPrice: 2056.0756, market: "OKX:GRAM-USDT", accountId: 12, unit: "GRAM" };
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -127,6 +130,7 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   5: { name: "연금저축 계좌", broker: "삼성증권" },
   6: { name: "펀드 계좌", broker: "한화자산운용 PINE" },
   8: { name: "국내 주식 계좌 2", broker: "대신증권" },
+  12: { name: "OKX GRAM 계좌", broker: "OKX" },
 };
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => ({
   ...account,
@@ -572,14 +576,15 @@ export default function Home() {
   const refreshCoinPrices = async () => {
     if (!coinHoldings.length) { setNotice("현재가를 반영할 코인 보유자산이 없습니다."); return; }
     try {
-      const response = await fetch(`/api/crypto-quotes?markets=${encodeURIComponent(coinHoldings.map(item => `KRW-${item.symbol}`).join(","))}`, { cache: "no-store" });
+      const marketFor = (holding: Holding) => holding.market ?? `KRW-${holding.symbol}`;
+      const response = await fetch(`/api/crypto-quotes?markets=${encodeURIComponent(coinHoldings.map(marketFor).join(","))}`, { cache: "no-store" });
       const data = await response.json() as { quotes?: Record<string, number>; previousCloses?: Record<string, number> };
       if (!data.quotes) throw new Error("No quotes");
       setCoinHoldings(current => {
         const next = current.map(holding => ({
           ...holding,
-          fallbackPrice: data.quotes?.[`KRW-${holding.symbol}`] ?? holding.fallbackPrice,
-          previousClose: data.previousCloses?.[`KRW-${holding.symbol}`] ?? holding.previousClose,
+          fallbackPrice: data.quotes?.[marketFor(holding)] ?? holding.fallbackPrice,
+          previousClose: data.previousCloses?.[marketFor(holding)] ?? holding.previousClose,
         }));
         updateStockAccounts("코인", next);
         return next;
@@ -634,6 +639,8 @@ export default function Home() {
       if (!data.state.usdHoldings?.some(holding => holding.accountId === seohaOverseasAccount.id && holding.symbol === seohaUsBondHoldings[0].symbol)) setUsdHoldings(current => [...current, ...seohaUsBondHoldings]);
       if (!data.state.accounts?.some(account => account.id === eunhoPensionAccount.id)) setAccounts(current => [...current, eunhoPensionAccount]);
       if (!data.state.pensionHoldings?.some(holding => holding.accountId === eunhoPensionAccount.id)) setPensionHoldings(current => [...current, ...eunhoPensionHoldings]);
+      if (!data.state.accounts?.some(account => account.id === okxGramAccount.id)) setAccounts(current => [...current, okxGramAccount]);
+      if (!data.state.coinHoldings?.some(holding => holding.accountId === okxGramAccount.id && holding.symbol === "GRAM")) setCoinHoldings(current => [...current, okxGramHolding]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
