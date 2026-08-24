@@ -1,17 +1,37 @@
-type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string; marketPrice?: number };
+type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; accountId?: number; assetClass?: string; marketPrice?: number };
 type Account = { id: number; type: string; amount: number; returnRate: number; portfolioId?: string };
 type ProfitPeak = { profit: number; date: string };
-type PortfolioState = { portfolios?: Array<{ id: string; name: string }>; accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak>; telegramReportDate?: string };
+type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
+type PortfolioState = { portfolios?: Array<{ id: string; name: string }>; accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Snapshot[]; profitPeaks?: Record<string, ProfitPeak>; telegramReportDate?: string };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name ?? ""}`;
 const number = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
 const signed = (value: number) => `${value >= 0 ? "+" : ""}${number.format(value)}`;
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+const assetTypes = ["국내 주식", "해외 주식", "채권·현금성", "대체자산", "펀드", "가상자산"];
+type AssetAmounts = Record<string, number>;
+type DailyMove = { name: string; symbol: string; rate: number };
 
-function telegramReports(state: PortfolioState, accounts: Account[], date: string) {
+function emptyAssetAmounts(): AssetAmounts {
+  return Object.fromEntries(assetTypes.map(type => [type, 0]));
+}
+
+function portfolioNames(state: PortfolioState) {
   const names = new Map([["kim-soobeom", "김수범"], ["kim-seoha", "김서하"], ["kim-eunho", "김은호"]]);
   state.portfolios?.forEach(portfolio => names.set(portfolio.id, portfolio.name));
+  return names;
+}
+
+function telegramReports(
+  state: PortfolioState,
+  accounts: Account[],
+  date: string,
+  allocations: Map<string, AssetAmounts>,
+  previousAllocations: Map<string, AssetAmounts>,
+  movers: Map<string, { gainers: DailyMove[]; losers: DailyMove[] }>,
+) {
+  const names = portfolioNames(state);
   const groups = new Map<string, { amount: number; cost: number }>();
   accounts.forEach(account => {
     const id = account.portfolioId ?? "kim-soobeom";
@@ -20,14 +40,41 @@ function telegramReports(state: PortfolioState, accounts: Account[], date: strin
     group.cost += account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
     groups.set(id, group);
   });
-  return [...groups.entries()].map(([id, group]) => [
-    `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
-    `${date} KST`,
-    "",
-    `평가금액  ${number.format(group.amount)}원`,
-    `수익률  ${group.cost > 0 ? percent((group.amount / group.cost - 1) * 100) : "-"}`,
-    `평가손익  ${signed(group.amount - group.cost)}원`,
-  ].join("\n"));
+  return [...groups.entries()].map(([id, group]) => {
+    const allocation = allocations.get(id) ?? emptyAssetAmounts();
+    const previousAllocation = previousAllocations.get(id);
+    const allocationTotal = Object.values(allocation).reduce((sum, value) => sum + value, 0);
+    const previousTotal = Object.values(previousAllocation ?? {}).reduce((sum, value) => sum + value, 0);
+    const allocationLines = Object.entries(allocation)
+      .filter(([, amount]) => amount > 0)
+      .sort(([, left], [, right]) => right - left)
+      .map(([type, amount]) => {
+        const weight = amount / allocationTotal * 100;
+        const previousWeight = previousTotal && previousAllocation ? (previousAllocation[type] ?? 0) / previousTotal * 100 : null;
+        return `• ${type} ${weight.toFixed(1)}%${previousWeight === null ? "" : ` (${(weight - previousWeight >= 0 ? "+" : "") + (weight - previousWeight).toFixed(1)}%p)`}`;
+      });
+    const movement = movers.get(id) ?? { gainers: [], losers: [] };
+    const moveLines = (items: DailyMove[]) => items.length
+      ? items.map((item, index) => `${index + 1}. ${item.name} ${percent(item.rate)}`)
+      : ["- 해당 없음"];
+    return [
+      `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
+      `${date} KST`,
+      "",
+      `평가금액  ${number.format(group.amount)}원`,
+      `수익률  ${group.cost > 0 ? percent((group.amount / group.cost - 1) * 100) : "-"}`,
+      `평가손익  ${signed(group.amount - group.cost)}원`,
+      "",
+      "📈 상승 Top 3 (이전 종가 대비)",
+      ...moveLines(movement.gainers),
+      "",
+      "📉 하락 Top 3 (이전 종가 대비)",
+      ...moveLines(movement.losers),
+      "",
+      "🧩 자산 유형별 비중",
+      ...(allocationLines.length ? allocationLines : ["- 보유 자산 없음"]),
+    ].join("\n");
+  });
 }
 
 async function sendTelegramReports(messages: string[]) {
@@ -43,26 +90,34 @@ async function sendTelegramReports(messages: string[]) {
   return results.every(response => response.ok);
 }
 
-async function quote(symbol: string): Promise<number | null> {
+type MarketQuote = { price: number; previousClose?: number };
+
+async function quote(symbol: string): Promise<MarketQuote | null> {
   if (/^\d{6}\.KS$/.test(symbol)) {
     const code = symbol.replace(/\.KS$/, "");
     const response = await fetch(`https://m.stock.naver.com/api/stock/${code}/basic`, { cache: "no-store" });
     if (!response.ok) return null;
-    const data = await response.json() as { closePrice?: string };
+    const data = await response.json() as { closePrice?: string; compareToPreviousClosePrice?: string };
     const price = Number(data.closePrice?.replaceAll(",", ""));
-    return Number.isFinite(price) && price > 0 ? price : null;
+    const change = Number(data.compareToPreviousClosePrice?.replaceAll(",", ""));
+    return Number.isFinite(price) && price > 0 ? { price, previousClose: Number.isFinite(change) ? price - change : undefined } : null;
   }
   const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`, { headers: { "User-Agent": "PortfolioDashboard/1.0" }, next: { revalidate: 21600 } });
   if (!response.ok) return null;
-  const data = await response.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number } }> } };
-  const price = data.chart?.result?.[0]?.meta?.regularMarketPrice;
-  return typeof price === "number" && price > 0 ? price : null;
+  const data = await response.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number; regularMarketPreviousClose?: number; previousClose?: number } }> } };
+  const meta = data.chart?.result?.[0]?.meta;
+  const price = meta?.regularMarketPrice;
+  const previousClose = meta?.regularMarketPreviousClose ?? meta?.previousClose;
+  return typeof price === "number" && price > 0 ? { price, previousClose: typeof previousClose === "number" && previousClose > 0 ? previousClose : undefined } : null;
 }
 
 async function refreshStockPrices(holdings: Holding[], exchangeRate = 1) {
   const quotes = await Promise.all(holdings.map(async holding => [holding.symbol, await quote(holding.symbol)] as const));
-  const prices = Object.fromEntries(quotes.filter((entry): entry is [string, number] => entry[1] !== null));
-  const next = holdings.map(holding => ({ ...holding, fallbackPrice: prices[holding.symbol] ?? holding.fallbackPrice }));
+  const prices = Object.fromEntries(quotes.filter((entry): entry is [string, MarketQuote] => entry[1] !== null));
+  const next = holdings.map(holding => {
+    const latest = prices[holding.symbol];
+    return latest ? { ...holding, fallbackPrice: latest.price, previousClose: latest.previousClose ?? holding.previousClose } : holding;
+  });
   return { holdings: next, exchangeRate };
 }
 
@@ -71,9 +126,12 @@ async function refreshCoinPrices(holdings: Holding[]) {
   const markets = holdings.map(holding => `KRW-${holding.symbol}`).join(",");
   const response = await fetch(`https://api.upbit.com/v1/ticker?markets=${encodeURIComponent(markets)}`, { next: { revalidate: 21600 } });
   if (!response.ok) return holdings;
-  const data = await response.json() as Array<{ market: string; trade_price: number }>;
-  const prices = Object.fromEntries(data.map(item => [item.market, item.trade_price]));
-  return holdings.map(holding => ({ ...holding, fallbackPrice: prices[`KRW-${holding.symbol}`] ?? holding.fallbackPrice }));
+  const data = await response.json() as Array<{ market: string; trade_price: number; prev_closing_price?: number }>;
+  const prices = Object.fromEntries(data.map(item => [item.market, item]));
+  return holdings.map(holding => {
+    const latest = prices[`KRW-${holding.symbol}`];
+    return latest ? { ...holding, fallbackPrice: latest.trade_price, previousClose: latest.prev_closing_price ?? holding.previousClose } : holding;
+  });
 }
 
 function accountPerformance(accounts: Account[], type: string, holdings: Holding[], exchangeRate = 1) {
@@ -118,7 +176,7 @@ function assetWeightsFor(accountType: string, holding?: Holding): Array<[string,
 }
 
 function computeAssetAmounts(accounts: Account[], sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
-  const amounts: Record<string, number> = { "국내 주식": 0, "해외 주식": 0, "채권·현금성": 0, "대체자산": 0, "펀드": 0, "가상자산": 0 };
+  const amounts = emptyAssetAmounts();
   const positionsByAccount = new Map<number, Array<{ holding: Holding; value: number }>>();
   sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
     if (!holding.accountId) return;
@@ -133,6 +191,91 @@ function computeAssetAmounts(accounts: Account[], sources: Array<{ holdings: Hol
     positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => { amounts[type] += account.amount * position.value / positionsTotal * weight; }));
   });
   return amounts;
+}
+
+function positionsForAccounts(sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
+  const positionsByAccount = new Map<number, Array<{ holding: Holding; value: number }>>();
+  sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
+    if (!holding.accountId) return;
+    const positions = positionsByAccount.get(holding.accountId) ?? [];
+    positions.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate });
+    positionsByAccount.set(holding.accountId, positions);
+  }));
+  return positionsByAccount;
+}
+
+function portfolioAssetAmounts(accounts: Account[], sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
+  const output = new Map<string, AssetAmounts>();
+  const positionsByAccount = positionsForAccounts(sources);
+  accounts.forEach(account => {
+    const portfolioId = account.portfolioId ?? "kim-soobeom";
+    const amounts = output.get(portfolioId) ?? emptyAssetAmounts();
+    const positions = positionsByAccount.get(account.id) ?? [];
+    const total = positions.reduce((sum, position) => sum + position.value, 0);
+    if (!total) amounts[assetTypeFor(account.type)] += account.amount;
+    else positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => {
+      amounts[type] += account.amount * position.value / total * weight;
+    }));
+    output.set(portfolioId, amounts);
+  });
+  return output;
+}
+
+function previousPortfolioAssetAmounts(
+  previous: Snapshot | undefined,
+  accounts: Account[],
+  sources: Array<{ holdings: Holding[]; exchangeRate?: number }>,
+) {
+  const output = new Map<string, AssetAmounts>();
+  if (!previous?.accountAmounts) return output;
+  const positionsByAccount = new Map<number, Array<{ holding: Holding; snapshotValue: number }>>();
+  sources.forEach(({ holdings }) => holdings.forEach(holding => {
+    if (!holding.accountId) return;
+    const snapshotValue = previous.holdingAmounts?.[holdingSnapshotKey(holding.accountId, holding)];
+    if (!snapshotValue) return;
+    const positions = positionsByAccount.get(holding.accountId) ?? [];
+    positions.push({ holding, snapshotValue });
+    positionsByAccount.set(holding.accountId, positions);
+  }));
+  accounts.forEach(account => {
+    const accountAmount = previous.accountAmounts?.[String(account.id)];
+    if (typeof accountAmount !== "number") return;
+    const portfolioId = account.portfolioId ?? "kim-soobeom";
+    const amounts = output.get(portfolioId) ?? emptyAssetAmounts();
+    const positions = positionsByAccount.get(account.id) ?? [];
+    const total = positions.reduce((sum, position) => sum + position.snapshotValue, 0);
+    if (!total) amounts[assetTypeFor(account.type)] += accountAmount;
+    else positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => {
+      amounts[type] += accountAmount * position.snapshotValue / total * weight;
+    }));
+    output.set(portfolioId, amounts);
+  });
+  return output;
+}
+
+function portfolioDailyMovers(accounts: Account[], sources: Array<{ holdings: Holding[] }>) {
+  const accountsById = new Map(accounts.map(account => [account.id, account]));
+  const candidates = new Map<string, DailyMove>();
+  sources.forEach(({ holdings }) => holdings.forEach(holding => {
+    if (!holding.accountId || !holding.previousClose || holding.previousClose <= 0 || holding.fallbackPrice <= 0) return;
+    const account = accountsById.get(holding.accountId);
+    if (!account || account.type === "펀드" || holding.symbol === "CASH-KRW") return;
+    const id = account.portfolioId ?? "kim-soobeom";
+    const rate = (holding.fallbackPrice / holding.previousClose - 1) * 100;
+    const key = `${id}:${holding.symbol}`;
+    candidates.set(key, { name: holding.name ?? holding.symbol, symbol: holding.symbol, rate });
+  }));
+  const grouped = new Map<string, DailyMove[]>();
+  candidates.forEach((move, key) => {
+    const id = key.slice(0, key.indexOf(":"));
+    const items = grouped.get(id) ?? [];
+    items.push(move);
+    grouped.set(id, items);
+  });
+  return new Map([...grouped.entries()].map(([id, items]) => [id, {
+    gainers: items.filter(item => item.rate > 0).sort((left, right) => right.rate - left.rate).slice(0, 3),
+    losers: items.filter(item => item.rate < 0).sort((left, right) => left.rate - right.rate).slice(0, 3),
+  }]));
 }
 
 function computeHoldingAmounts(sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
@@ -199,12 +342,15 @@ export async function saveDailyPortfolioSnapshot() {
   const isa = await refreshStockPrices(state.isaHoldings ?? []);
   const pension = await refreshStockPrices(state.pensionHoldings ?? []);
   const usd = await refreshStockPrices(state.usdHoldings ?? []);
-  const usdKrw = await quote("KRW=X") ?? 1380;
+  const usdKrw = (await quote("KRW=X"))?.price ?? 1380;
   const coins = await refreshCoinPrices(state.coinHoldings ?? []);
   const irpHoldings = state.irpHoldings ?? [];
   const irpQuoted = await refreshStockPrices(irpHoldings.filter(holding => holding.assetClass === "ETF·주식" && holding.symbol.endsWith(".KS")));
-  const irpPrices = Object.fromEntries(irpQuoted.holdings.map(holding => [holding.symbol, holding.fallbackPrice]));
-  const irp = irpHoldings.map(holding => irpPrices[holding.symbol] ? { ...holding, fallbackPrice: irpPrices[holding.symbol], marketPrice: irpPrices[holding.symbol] } : holding);
+  const irpPrices = Object.fromEntries(irpQuoted.holdings.map(holding => [holding.symbol, holding]));
+  const irp = irpHoldings.map(holding => {
+    const latest = irpPrices[holding.symbol];
+    return latest ? { ...holding, fallbackPrice: latest.fallbackPrice, previousClose: latest.previousClose ?? holding.previousClose, marketPrice: latest.fallbackPrice } : holding;
+  });
   let accounts = accountPerformance(state.accounts, "국내 주식", domestic.holdings);
   accounts = accountPerformance(accounts, "ISA", isa.holdings);
   accounts = accountPerformance(accounts, "연금저축", pension.holdings);
@@ -225,13 +371,17 @@ export async function saveDailyPortfolioSnapshot() {
   const assetCosts = computeAssetCosts(accounts, holdingSources);
   const holdingCosts = computeHoldingCosts(holdingSources);
   const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, cost, accountAmounts, accountCosts, assetAmounts, assetCosts, holdingAmounts, holdingCosts }].sort((a, b) => a.date.localeCompare(b.date));
+  const previousSnapshot = [...(state.snapshots ?? [])].filter(snapshot => snapshot.date < date).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+  const currentPortfolioAllocations = portfolioAssetAmounts(accounts, holdingSources);
+  const previousPortfolioAllocations = previousPortfolioAssetAmounts(previousSnapshot, accounts, holdingSources);
+  const dailyMovers = portfolioDailyMovers(accounts, holdingSources);
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: irp }], date);
   const nextState = { ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks };
   const payload = JSON.stringify(nextState);
   await saveDashboardState(payload);
   if (state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
   try {
-    const sent = await sendTelegramReports(telegramReports(state, accounts, date));
+    const sent = await sendTelegramReports(telegramReports(state, accounts, date, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers));
     if (!sent) return { telegramReport: "failed" as const };
     await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: date }));
     return { telegramReport: "sent" as const };
