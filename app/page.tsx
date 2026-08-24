@@ -60,6 +60,18 @@ const eunhoPensionHoldings: Holding[] = [
 const okxGramAccount: Account = { id: 12, type: "코인", broker: "OKX", name: "OKX GRAM 계좌", amount: 801869, returnRate: 0, color: "blue", portfolioId: "kim-soobeom" };
 // 스크린샷에는 매입단가와 손익이 표시되지 않아, 등록 시점 현재가를 기준값으로 기록합니다.
 const okxGramHolding: Holding = { symbol: "GRAM", name: "GRAM", quantity: 390, averagePrice: 2056.0756, fallbackPrice: 2056.0756, market: "OKX:GRAM-USDT", accountId: 12, unit: "GRAM" };
+// 토스증권은 국내·해외 주식의 통화와 시세 조회 경로가 달라 두 하위 계좌로 보관합니다.
+// 두 계좌 모두 김수범 포트폴리오의 토스증권 자산입니다.
+const tossDomesticAccount: Account = { id: 13, type: "국내 주식", broker: "토스증권", name: "토스 국내 주식 계좌", amount: 18350, returnRate: (18350 / 10810 - 1) * 100, color: "violet", portfolioId: "kim-soobeom" };
+const tossDomesticHoldings: Holding[] = [
+  { symbol: "047040.KS", name: "대우건설", quantity: 1, averagePrice: 7190, fallbackPrice: 15610, accountId: 13 },
+  { symbol: "009180.KS", name: "한솔로지스틱스", quantity: 1, averagePrice: 3620, fallbackPrice: 2740, accountId: 13 },
+];
+const tossOverseasAccount: Account = { id: 14, type: "미국 주식", broker: "토스증권", name: "토스 해외 주식 계좌", amount: 163618, returnRate: (163618 / 103839 - 1) * 100, color: "blue", portfolioId: "kim-soobeom" };
+const tossOverseasHoldings: Holding[] = [
+  { symbol: "BRK-A", name: "버크셔 해서웨이 A", quantity: 0.000153, averagePrice: 99729 / 0.000153 / 1380, fallbackPrice: 157392 / 0.000153 / 1380, accountId: 14 },
+  { symbol: "TSLA", name: "테슬라", quantity: 0.012458, averagePrice: 4110 / 0.012458 / 1380, fallbackPrice: 6226 / 0.012458 / 1380, accountId: 14 },
+];
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const won = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
@@ -131,6 +143,8 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   6: { name: "펀드 계좌", broker: "한화자산운용 PINE" },
   8: { name: "국내 주식 계좌 2", broker: "대신증권" },
   12: { name: "OKX GRAM 계좌", broker: "OKX" },
+  13: { name: "토스 국내 주식 계좌", broker: "토스증권" },
+  14: { name: "토스 해외 주식 계좌", broker: "토스증권" },
 };
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => ({
   ...account,
@@ -641,6 +655,10 @@ export default function Home() {
       if (!data.state.pensionHoldings?.some(holding => holding.accountId === eunhoPensionAccount.id)) setPensionHoldings(current => [...current, ...eunhoPensionHoldings]);
       if (!data.state.accounts?.some(account => account.id === okxGramAccount.id)) setAccounts(current => [...current, okxGramAccount]);
       if (!data.state.coinHoldings?.some(holding => holding.accountId === okxGramAccount.id && holding.symbol === "GRAM")) setCoinHoldings(current => [...current, okxGramHolding]);
+      if (!data.state.accounts?.some(account => account.id === tossDomesticAccount.id)) setAccounts(current => [...current, tossDomesticAccount]);
+      if (!data.state.holdings?.some(holding => holding.accountId === tossDomesticAccount.id)) setHoldings(current => [...current, ...tossDomesticHoldings]);
+      if (!data.state.accounts?.some(account => account.id === tossOverseasAccount.id)) setAccounts(current => [...current, tossOverseasAccount]);
+      if (!data.state.usdHoldings?.some(holding => holding.accountId === tossOverseasAccount.id)) setUsdHoldings(current => [...current, ...tossOverseasHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
