@@ -14,6 +14,12 @@ type AssetAmounts = Record<string, number>;
 type DailyMove = { name: string; symbol: string; rate: number; assetType: string };
 
 const displayDate = (date?: string) => date?.replaceAll("-", ".") ?? "";
+const displayDateWithWeekday = (date?: string) => {
+  if (!date) return "";
+  const weekday = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", weekday: "short" })
+    .format(new Date(`${date}T12:00:00+09:00`));
+  return `${displayDate(date)} (${weekday})`;
+};
 const previousWeekday = (date: string) => {
   const prior = new Date(`${date}T12:00:00+09:00`);
   do prior.setDate(prior.getDate() - 1); while (prior.getDay() === 0 || prior.getDay() === 6);
@@ -77,8 +83,8 @@ function telegramReports(
     const currentProfit = group.amount - group.cost;
     const previousProfit = previousAmount - previousCost;
     const comparisonBasis = previousSnapshot
-      ? `${displayDate(previousSnapshot.date)} 장 마감 → ${displayDate(date)} 장 마감 (KST)`
-      : `${displayDate(date)} 장 마감 (비교 기준 생성 중)`;
+      ? `${displayDateWithWeekday(previousSnapshot.date)} 장 마감 → ${displayDateWithWeekday(date)} 장 마감 (KST)`
+      : `${displayDateWithWeekday(date)} 장 마감 (비교 기준 생성 중)`;
     const moveLines = (items: DailyMove[]) => items.length
       ? items.map((item, index) => `${index + 1}. [${item.assetType}] ${item.name} ${percent(item.rate)}`)
       : ["- 해당 없음"];
