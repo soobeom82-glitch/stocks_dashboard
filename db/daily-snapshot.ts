@@ -31,6 +31,7 @@ function telegramReports(
   previousAllocations: Map<string, AssetAmounts>,
   movers: Map<string, { gainers: DailyMove[]; losers: DailyMove[] }>,
   previousSnapshotDate?: string,
+  portfolioId?: string,
 ) {
   const names = portfolioNames(state);
   const groups = new Map<string, { amount: number; cost: number }>();
@@ -41,7 +42,7 @@ function telegramReports(
     group.cost += account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
     groups.set(id, group);
   });
-  return [...groups.entries()].map(([id, group]) => {
+  return [...groups.entries()].filter(([id]) => !portfolioId || id === portfolioId).map(([id, group]) => {
     const allocation = allocations.get(id) ?? emptyAssetAmounts();
     const previousAllocation = previousAllocations.get(id);
     const allocationTotal = Object.values(allocation).reduce((sum, value) => sum + value, 0);
@@ -349,7 +350,7 @@ function updateProfitPeaks(state: PortfolioState, accounts: Account[], groups: A
   return peaks;
 }
 
-export async function saveDailyPortfolioSnapshot() {
+export async function saveDailyPortfolioSnapshot(options: { forceTelegram?: boolean; portfolioId?: string } = {}) {
   const saved = await loadDashboardState();
   if (!saved) return;
   const state = JSON.parse(saved.payload) as PortfolioState;
@@ -396,9 +397,11 @@ export async function saveDailyPortfolioSnapshot() {
   const nextState = { ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks };
   const payload = JSON.stringify(nextState);
   await saveDashboardState(payload);
-  if (state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
+  if (!options.forceTelegram && state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
   try {
-    const sent = await sendTelegramReports(telegramReports(state, accounts, date, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers, previousSnapshot?.date));
+    const reports = telegramReports(state, accounts, date, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers, previousSnapshot?.date, options.portfolioId);
+    if (!reports.length) return { telegramReport: "portfolio-not-found" as const };
+    const sent = await sendTelegramReports(reports);
     if (!sent) return { telegramReport: "failed" as const };
     await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: date }));
     return { telegramReport: "sent" as const };

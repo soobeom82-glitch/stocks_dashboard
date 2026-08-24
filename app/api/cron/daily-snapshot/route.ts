@@ -10,12 +10,16 @@ export async function GET(request: Request) {
   }
 
   try {
-    const backfillDays = Number(new URL(request.url).searchParams.get("backfillDays"));
+    const url = new URL(request.url);
+    const backfillDays = Number(url.searchParams.get("backfillDays"));
     if (Number.isInteger(backfillDays) && backfillDays > 0 && backfillDays <= 10) {
       const result = await backfillRecentSnapshots(backfillDays);
       return Response.json({ saved: true, backfilled: true, ...result, completedAt: new Date().toISOString() });
     }
-    const result = await saveDailyPortfolioSnapshot();
+    const forceTelegram = url.searchParams.get("forceTelegram") === "1";
+    const portfolioId = url.searchParams.get("portfolioId") ?? undefined;
+    if (portfolioId && !forceTelegram) return Response.json({ error: "Manual report requires forceTelegram=1" }, { status: 400 });
+    const result = await saveDailyPortfolioSnapshot({ forceTelegram, portfolioId });
     return Response.json({ saved: true, ...result, completedAt: new Date().toISOString() });
   } catch (error) {
     console.error("Daily portfolio snapshot failed", error);
