@@ -43,7 +43,6 @@ function telegramReports(
   allocations: Map<string, AssetAmounts>,
   previousAllocations: Map<string, AssetAmounts>,
   movers: Map<string, { gainers: DailyMove[]; losers: DailyMove[] }>,
-  holdingSources: Array<{ holdings: Holding[] }>,
   previousSnapshot?: Snapshot,
   portfolioId?: string,
 ) {
@@ -77,23 +76,15 @@ function telegramReports(
     const previousRate = hasPreviousPerformance ? (previousAmount / previousCost - 1) * 100 : null;
     const currentProfit = group.amount - group.cost;
     const previousProfit = previousAmount - previousCost;
-    const portfolioAccountIds = new Set(accounts.filter(account => (account.portfolioId ?? "kim-soobeom") === id).map(account => account.id));
-    const coinAccountIds = new Set(accounts.filter(account => account.type === "코인").map(account => account.id));
-    const comparableHoldings = holdingSources.flatMap(source => source.holdings).filter(holding => portfolioAccountIds.has(holding.accountId ?? -1) && holding.previousClose && holding.previousCloseDate && holding.quoteDate);
-    const stockBasis = [...new Set(comparableHoldings.filter(holding => !coinAccountIds.has(holding.accountId ?? -1)).map(holding => `${displayDate(holding.previousCloseDate)} 종가 → ${displayDate(holding.quoteDate)} 현재가`))];
-    const cryptoBasis = [...new Set(comparableHoldings.filter(holding => coinAccountIds.has(holding.accountId ?? -1)).map(holding => `${displayDate(holding.previousCloseDate)} 기준가 → ${displayDate(holding.quoteDate)} 현재가`))];
-    const basisLines = [
-      ...stockBasis.map(value => `• 주식·ETF  ${value}`),
-      ...cryptoBasis.map(value => `• 가상자산  ${value}`),
-      `• 포트폴리오 스냅샷  ${previousSnapshot ? `${displayDate(previousSnapshot.date)} → ${displayDate(date)}` : `${displayDate(date)} 단일 기준`} KST`,
-    ];
+    const comparisonBasis = previousSnapshot
+      ? `${displayDate(previousSnapshot.date)} 장 마감 → ${displayDate(date)} 장 마감 (KST)`
+      : `${displayDate(date)} 장 마감 (비교 기준 생성 중)`;
     const moveLines = (items: DailyMove[]) => items.length
       ? items.map((item, index) => `${index + 1}. ${item.name} ${percent(item.rate)}`)
       : ["- 해당 없음"];
     return [
       `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
-      "평가 기준",
-      ...basisLines,
+      `평가 기준  ${comparisonBasis}`,
       "",
       `평가금액  ${number.format(group.amount)}원${hasPreviousPerformance ? `  (${signed(group.amount - previousAmount)}원, ${percent((group.amount / previousAmount - 1) * 100)})` : ""}`,
       `수익률  ${currentRate === null ? "-" : percent(currentRate)}${previousRate === null || currentRate === null ? "" : `  (${currentRate - previousRate >= 0 ? "+" : ""}${(currentRate - previousRate).toFixed(2)}%p)`}`,
@@ -105,7 +96,7 @@ function telegramReports(
       "📉 하락 Top 3",
       ...moveLines(movement.losers),
       "",
-      `🧩 자산 유형별 비중 (${previousSnapshot ? `${previousSnapshot.date} → ${date}` : `${date} 기준`})`,
+      `🧩 자산 유형별 비중 (${previousSnapshot ? `${displayDate(previousSnapshot.date)} → ${displayDate(date)}` : `${displayDate(date)} 기준`})`,
       ...(allocationLines.length ? allocationLines : ["- 보유 자산 없음"]),
     ].join("\n");
   });
@@ -430,7 +421,11 @@ export async function saveDailyPortfolioSnapshot(options: { forceTelegram?: bool
   const assetCosts = computeAssetCosts(accounts, holdingSources);
   const holdingCosts = computeHoldingCosts(holdingSources);
   const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, cost, accountAmounts, accountCosts, assetAmounts, assetCosts, holdingAmounts, holdingCosts }].sort((a, b) => a.date.localeCompare(b.date));
-  const previousSnapshot = [...(state.snapshots ?? [])].filter(snapshot => snapshot.date < date).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
+  // 오전 리포트는 장 시작 전이므로 현재 날짜가 아닌, 가장 최근 국내 주식 마감일을 기준으로 비교합니다.
+  // 예: 월요일 발송은 목요일 마감 → 금요일 마감, 화요일 발송은 금요일 마감 → 월요일 마감입니다.
+  const latestMarketDate = previousWeekday(date);
+  const comparisonStartDate = previousWeekday(latestMarketDate);
+  const previousSnapshot = [...(state.snapshots ?? [])].filter(snapshot => snapshot.date <= comparisonStartDate).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
   const currentPortfolioAllocations = portfolioAssetAmounts(accounts, holdingSources);
   const previousPortfolioAllocations = previousPortfolioAssetAmounts(previousSnapshot, accounts, holdingSources);
   const dailyMovers = portfolioDailyMovers(accounts, holdingSources);
@@ -440,7 +435,7 @@ export async function saveDailyPortfolioSnapshot(options: { forceTelegram?: bool
   await saveDashboardState(payload);
   if (!options.forceTelegram && state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
   try {
-    const reports = telegramReports(state, accounts, date, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers, holdingSources, previousSnapshot, options.portfolioId);
+    const reports = telegramReports(state, accounts, latestMarketDate, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers, previousSnapshot, options.portfolioId);
     if (!reports.length) return { telegramReport: "portfolio-not-found" as const };
     const sent = await sendTelegramReports(reports);
     if (!sent) return { telegramReport: "failed" as const };
