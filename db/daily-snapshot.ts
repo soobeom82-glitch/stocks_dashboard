@@ -11,7 +11,7 @@ const signed = (value: number) => `${value >= 0 ? "+" : ""}${number.format(value
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const assetTypes = ["국내 주식", "해외 주식", "채권·현금성", "대체자산", "펀드", "가상자산"];
 type AssetAmounts = Record<string, number>;
-type DailyMove = { name: string; symbol: string; rate: number };
+type DailyMove = { name: string; symbol: string; rate: number; assetType: string };
 
 const displayDate = (date?: string) => date?.replaceAll("-", ".") ?? "";
 const previousWeekday = (date: string) => {
@@ -80,7 +80,7 @@ function telegramReports(
       ? `${displayDate(previousSnapshot.date)} 장 마감 → ${displayDate(date)} 장 마감 (KST)`
       : `${displayDate(date)} 장 마감 (비교 기준 생성 중)`;
     const moveLines = (items: DailyMove[]) => items.length
-      ? items.map((item, index) => `${index + 1}. ${item.name} ${percent(item.rate)}`)
+      ? items.map((item, index) => `${index + 1}. [${item.assetType}] ${item.name} ${percent(item.rate)}`)
       : ["- 해당 없음"];
     return [
       `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
@@ -90,10 +90,10 @@ function telegramReports(
       `수익률  ${currentRate === null ? "-" : percent(currentRate)}${previousRate === null || currentRate === null ? "" : `  (${currentRate - previousRate >= 0 ? "+" : ""}${(currentRate - previousRate).toFixed(2)}%p)`}`,
       `평가손익  ${signed(currentProfit)}원${hasPreviousPerformance ? `  (${signed(currentProfit - previousProfit)}원)` : ""}`,
       "",
-      "📈 상승 Top 3",
+      "📈 상승 Top 5",
       ...moveLines(movement.gainers),
       "",
-      "📉 하락 Top 3",
+      "📉 하락 Top 5",
       ...moveLines(movement.losers),
       "",
       `🧩 자산 유형별 비중 (${previousSnapshot ? `${displayDate(previousSnapshot.date)} → ${displayDate(date)}` : `${displayDate(date)} 기준`})`,
@@ -313,7 +313,7 @@ function portfolioDailyMovers(accounts: Account[], sources: Array<{ holdings: Ho
     const id = account.portfolioId ?? "kim-soobeom";
     const rate = (holding.fallbackPrice / holding.previousClose - 1) * 100;
     const key = `${id}:${holding.symbol}`;
-    candidates.set(key, { name: holding.name ?? holding.symbol, symbol: holding.symbol, rate });
+    candidates.set(key, { name: holding.name ?? holding.symbol, symbol: holding.symbol, rate, assetType: assetTypeFor(account.type, holding) });
   }));
   const grouped = new Map<string, DailyMove[]>();
   candidates.forEach((move, key) => {
@@ -323,8 +323,8 @@ function portfolioDailyMovers(accounts: Account[], sources: Array<{ holdings: Ho
     grouped.set(id, items);
   });
   return new Map([...grouped.entries()].map(([id, items]) => [id, {
-    gainers: items.filter(item => item.rate > 0).sort((left, right) => right.rate - left.rate).slice(0, 3),
-    losers: items.filter(item => item.rate < 0).sort((left, right) => left.rate - right.rate).slice(0, 3),
+    gainers: items.filter(item => item.rate > 0).sort((left, right) => right.rate - left.rate).slice(0, 5),
+    losers: items.filter(item => item.rate < 0).sort((left, right) => left.rate - right.rate).slice(0, 5),
   }]));
 }
 
