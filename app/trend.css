@@ -28,4 +28,3 @@
 .trend-value-bars rect{opacity:.66}
 .trend-list-toggle{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;margin-top:16px;border:1px solid #e1e5ee;border-radius:8px;padding:10px;color:#667188;background:#fafbfe;font-size:12px;font-weight:700}.trend-list-toggle:hover{background:#f3f5fa}.trend-list-toggle span{font-size:14px;line-height:1;transition:transform .15s ease}.trend-list-toggle[aria-expanded="false"] span{transform:rotate(180deg)}
 .trend-headline-metrics .valuation-amount{flex-direction:row!important;align-items:baseline;gap:7px}.trend-headline-metrics .valuation-daily-rate{display:inline!important;font-size:12px!important}
-.trend-headline-metrics .valuation-amount small{color:#8b94a8;font-size:11px;font-weight:600;letter-spacing:0}
