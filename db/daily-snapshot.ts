@@ -1,10 +1,44 @@
 type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; accountId?: number; assetClass?: string; marketPrice?: number };
-type Account = { id: number; type: string; amount: number; returnRate: number };
+type Account = { id: number; type: string; amount: number; returnRate: number; portfolioId?: string };
 type ProfitPeak = { profit: number; date: string };
-type PortfolioState = { accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak> };
+type PortfolioState = { portfolios?: Array<{ id: string; name: string }>; accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Array<{ date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> }>; profitPeaks?: Record<string, ProfitPeak>; telegramReportDate?: string };
 
 const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul" }).format(new Date());
 const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name ?? ""}`;
+const number = new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 });
+const signed = (value: number) => `${value >= 0 ? "+" : ""}${number.format(value)}`;
+const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+
+function telegramReport(state: PortfolioState, accounts: Account[], date: string) {
+  const names = new Map([["kim-soobeom", "김수범"], ["kim-seoha", "김서하"], ["kim-eunho", "김은호"]]);
+  state.portfolios?.forEach(portfolio => names.set(portfolio.id, portfolio.name));
+  const groups = new Map<string, { amount: number; cost: number }>();
+  accounts.forEach(account => {
+    const id = account.portfolioId ?? "kim-soobeom";
+    const group = groups.get(id) ?? { amount: 0, cost: 0 };
+    group.amount += account.amount;
+    group.cost += account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
+    groups.set(id, group);
+  });
+  const total = accounts.reduce((sum, account) => sum + account.amount, 0);
+  const cost = accounts.reduce((sum, account) => sum + (account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0), 0);
+  const summary = ["📊 포트폴리오 일일 스냅샷", `${date} KST`, "", `통합 평가금액  ${number.format(total)}원`, `통합 수익률  ${cost > 0 ? percent((total / cost - 1) * 100) : "-"}`, `평가손익  ${signed(total - cost)}원`, "", "포트폴리오별"];
+  const details = [...groups.entries()].map(([id, group]) => `${names.get(id) ?? id}\n평가금액 ${number.format(group.amount)}원 · 수익률 ${group.cost > 0 ? percent((group.amount / group.cost - 1) * 100) : "-"} · 손익 ${signed(group.amount - group.cost)}원`);
+  return [...summary, ...details].join("\n");
+}
+
+async function sendTelegramReport(message: string) {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const chatId = process.env.TELEGRAM_CHAT_ID;
+  if (!token || !chatId) return false;
+  const response = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: message, disable_web_page_preview: true }),
+    cache: "no-store",
+  });
+  return response.ok;
+}
 
 async function quote(symbol: string): Promise<number | null> {
   if (/^\d{6}\.KS$/.test(symbol)) {
@@ -189,7 +223,18 @@ export async function saveDailyPortfolioSnapshot() {
   const holdingCosts = computeHoldingCosts(holdingSources);
   const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, cost, accountAmounts, accountCosts, assetAmounts, assetCosts, holdingAmounts, holdingCosts }].sort((a, b) => a.date.localeCompare(b.date));
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: irp }], date);
-  const payload = JSON.stringify({ ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks });
+  const nextState = { ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks };
+  const payload = JSON.stringify(nextState);
   await saveDashboardState(payload);
+  if (state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
+  try {
+    const sent = await sendTelegramReport(telegramReport(state, accounts, date));
+    if (!sent) return { telegramReport: "failed" as const };
+    await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: date }));
+    return { telegramReport: "sent" as const };
+  } catch (error) {
+    console.error("Telegram daily report failed", error);
+    return { telegramReport: "failed" as const };
+  }
 }
 import { loadDashboardState, saveDashboardState } from "./index";

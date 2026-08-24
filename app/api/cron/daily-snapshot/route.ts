@@ -15,8 +15,8 @@ export async function GET(request: Request) {
       const result = await backfillRecentSnapshots(backfillDays);
       return Response.json({ saved: true, backfilled: true, ...result, completedAt: new Date().toISOString() });
     }
-    await saveDailyPortfolioSnapshot();
-    return Response.json({ saved: true, completedAt: new Date().toISOString() });
+    const result = await saveDailyPortfolioSnapshot();
+    return Response.json({ saved: true, ...result, completedAt: new Date().toISOString() });
   } catch (error) {
     console.error("Daily portfolio snapshot failed", error);
     return Response.json({ error: "Snapshot failed" }, { status: 500 });
