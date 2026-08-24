@@ -30,6 +30,7 @@ function telegramReports(
   allocations: Map<string, AssetAmounts>,
   previousAllocations: Map<string, AssetAmounts>,
   movers: Map<string, { gainers: DailyMove[]; losers: DailyMove[] }>,
+  previousSnapshotDate?: string,
 ) {
   const names = portfolioNames(state);
   const groups = new Map<string, { amount: number; cost: number }>();
@@ -59,19 +60,19 @@ function telegramReports(
       : ["- 해당 없음"];
     return [
       `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
-      `${date} KST`,
+      `평가 기준  ${date} KST`,
       "",
       `평가금액  ${number.format(group.amount)}원`,
       `수익률  ${group.cost > 0 ? percent((group.amount / group.cost - 1) * 100) : "-"}`,
       `평가손익  ${signed(group.amount - group.cost)}원`,
       "",
-      "📈 상승 Top 3 (이전 종가 대비)",
+      "📈 상승 Top 3 (이전 거래일 종가 → 현재가)",
       ...moveLines(movement.gainers),
       "",
-      "📉 하락 Top 3 (이전 종가 대비)",
+      "📉 하락 Top 3 (이전 거래일 종가 → 현재가)",
       ...moveLines(movement.losers),
       "",
-      "🧩 자산 유형별 비중",
+      `🧩 자산 유형별 비중 (${previousSnapshotDate ? `${previousSnapshotDate} → ${date}` : `${date} 기준`})`,
       ...(allocationLines.length ? allocationLines : ["- 보유 자산 없음"]),
     ].join("\n");
   });
@@ -397,7 +398,7 @@ export async function saveDailyPortfolioSnapshot() {
   await saveDashboardState(payload);
   if (state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
   try {
-    const sent = await sendTelegramReports(telegramReports(state, accounts, date, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers));
+    const sent = await sendTelegramReports(telegramReports(state, accounts, date, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers, previousSnapshot?.date));
     if (!sent) return { telegramReport: "failed" as const };
     await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: date }));
     return { telegramReport: "sent" as const };
