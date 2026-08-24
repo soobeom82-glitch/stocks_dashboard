@@ -2,7 +2,20 @@ const MAX_SYMBOLS = 30;
 
 type Quote = { price: number; previousClose: number | null };
 
+async function latestDomesticQuote(symbol: string): Promise<Quote | null> {
+  const code = symbol.replace(/\.KS$/, "");
+  const response = await fetch(`https://m.stock.naver.com/api/stock/${code}/basic`, { cache: "no-store" });
+  if (!response.ok) return null;
+  const body = await response.json() as { closePrice?: string; compareToPreviousClosePrice?: string };
+  const price = Number(body.closePrice?.replaceAll(",", ""));
+  const change = Number(body.compareToPreviousClosePrice?.replaceAll(",", ""));
+  if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(change)) return null;
+  const previousClose = price - change;
+  return { price, previousClose: previousClose > 0 ? previousClose : null };
+}
+
 async function latestQuote(symbol: string): Promise<Quote | null> {
+  if (/^\d{6}\.KS$/.test(symbol)) return latestDomesticQuote(symbol);
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`;
   const response = await fetch(url, {
     headers: { "User-Agent": "PortfolioDashboard/1.0" },
@@ -35,7 +48,6 @@ export async function GET(request: Request) {
   const quotes = Object.fromEntries(available.map(([symbol, quote]) => [symbol, quote.price]));
   const previousCloses = Object.fromEntries(available.flatMap(([symbol, quote]) => quote.previousClose === null ? [] : [[symbol, quote.previousClose]]));
   const exchangeRate = includeExchangeRate ? await usdKrwRate() : null;
-  // 가격 원본은 Next 데이터 캐시에서 6시간 재사용하지만, 브라우저에는 오래된 응답을 저장하지 않습니다.
-  // 전일 종가처럼 새로 추가된 필드가 이전 응답 캐시 때문에 누락되는 것을 방지합니다.
+  // 국내 주식은 네이버 실시간 시세, 해외 주식·환율은 Yahoo 시세를 사용합니다.
   return Response.json({ quotes, previousCloses, exchangeRate, fetchedAt: new Date().toISOString() }, { headers: { "Cache-Control": "no-store" } });
 }

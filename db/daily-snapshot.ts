@@ -7,6 +7,14 @@ const KST_DATE = () => new Intl.DateTimeFormat("sv-SE", { timeZone: "Asia/Seoul"
 const holdingSnapshotKey = (accountId: number, holding: Holding) => `${accountId}:${holding.symbol}:${holding.name ?? ""}`;
 
 async function quote(symbol: string): Promise<number | null> {
+  if (/^\d{6}\.KS$/.test(symbol)) {
+    const code = symbol.replace(/\.KS$/, "");
+    const response = await fetch(`https://m.stock.naver.com/api/stock/${code}/basic`, { cache: "no-store" });
+    if (!response.ok) return null;
+    const data = await response.json() as { closePrice?: string };
+    const price = Number(data.closePrice?.replaceAll(",", ""));
+    return Number.isFinite(price) && price > 0 ? price : null;
+  }
   const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=1d&interval=1d`, { headers: { "User-Agent": "PortfolioDashboard/1.0" }, next: { revalidate: 21600 } });
   if (!response.ok) return null;
   const data = await response.json() as { chart?: { result?: Array<{ meta?: { regularMarketPrice?: number } }> } };
