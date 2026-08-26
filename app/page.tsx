@@ -72,6 +72,12 @@ const tossOverseasHoldings: Holding[] = [
   { symbol: "BRK-A", name: "버크셔 해서웨이 A", quantity: 0.000153, averagePrice: 99729 / 0.000153 / 1380, fallbackPrice: 157392 / 0.000153 / 1380, accountId: 14 },
   { symbol: "TSLA", name: "테슬라", quantity: 0.012458, averagePrice: 4110 / 0.012458 / 1380, fallbackPrice: 6226 / 0.012458 / 1380, accountId: 14 },
 ];
+// 카카오페이증권 스크린샷의 달러 보유 수량·평단가입니다. 현재가는 미국 시세와 환율로 갱신합니다.
+const kakaoPayOverseasAccount: Account = { id: 15, type: "미국 주식", broker: "카카오페이증권", name: "카카오페이 미국 주식 계좌", amount: 149.37 * 1380, returnRate: (149.37 / (0.4061 * 250.47 + 0.023 * 154.2) - 1) * 100, color: "blue", portfolioId: "kim-soobeom" };
+const kakaoPayOverseasHoldings: Holding[] = [
+  { symbol: "TSLA", name: "테슬라", quantity: 0.4061, averagePrice: 250.47, fallbackPrice: 142.27 / 0.4061, accountId: 15 },
+  { symbol: "AAPL", name: "애플", quantity: 0.023, averagePrice: 154.2, fallbackPrice: 7.1 / 0.023, accountId: 15 },
+];
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const snapshotComparisonPeriods = ["일", "주", "월", "분기", "반기", "1년", "최대"] as const;
@@ -151,6 +157,7 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   12: { name: "OKX GRAM 계좌", broker: "OKX" },
   13: { name: "토스 국내 주식 계좌", broker: "토스증권" },
   14: { name: "토스 해외 주식 계좌", broker: "토스증권" },
+  15: { name: "카카오페이 미국 주식 계좌", broker: "카카오페이증권" },
 };
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => ({
   ...account,
@@ -735,6 +742,8 @@ export default function Home() {
       if (!data.state.holdings?.some(holding => holding.accountId === tossDomesticAccount.id)) setHoldings(current => [...current, ...tossDomesticHoldings]);
       if (!data.state.accounts?.some(account => account.id === tossOverseasAccount.id)) setAccounts(current => [...current, tossOverseasAccount]);
       if (!data.state.usdHoldings?.some(holding => holding.accountId === tossOverseasAccount.id)) setUsdHoldings(current => [...current, ...tossOverseasHoldings]);
+      if (!data.state.accounts?.some(account => account.id === kakaoPayOverseasAccount.id)) setAccounts(current => [...current, kakaoPayOverseasAccount]);
+      if (!data.state.usdHoldings?.some(holding => holding.accountId === kakaoPayOverseasAccount.id)) setUsdHoldings(current => [...current, ...kakaoPayOverseasHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
