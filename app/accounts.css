@@ -19,6 +19,7 @@
 .snapshot-comparison-row > strong { text-align: center; }
 .snapshot-comparison-row { min-height: 58px; border-top: 1px solid #edf0f5; padding: 8px 10px; }
 .snapshot-comparison-row > strong { display: block; overflow: hidden; font-size: 14px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.snapshot-comparison-row .valuation-amount { display: block !important; }
 .snapshot-comparison-row > strong > small { margin-left: 4px; font-size: 11px; font-weight: 700; }
 .snapshot-total-row { background: #f5f6ff; box-shadow: inset 3px 0 #5666df; }
 .snapshot-total-row .snapshot-account-name > i { background: #5666df; color: #fff; }
