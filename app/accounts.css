@@ -6,3 +6,29 @@
 @media (max-width: 900px) {
   .account-row { grid-template-columns: 1.5fr 1fr 0.8fr 20px; }
 }
+
+.snapshot-comparison-panel { margin-top: 22px; }
+.snapshot-comparison-panel .panel-head { margin-bottom: 10px; }
+.snapshot-comparison-table { border-top: 1px solid #e7eaf1; }
+.snapshot-comparison-heading,
+.snapshot-comparison-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) repeat(3, minmax(135px, 1fr)); align-items: center; column-gap: 18px; }
+.snapshot-comparison-heading { min-height: 38px; padding: 0 10px; color: #98a0b2; font-size: 11px; }
+.snapshot-comparison-heading span:not(:first-child),
+.snapshot-comparison-row > strong { text-align: center; }
+.snapshot-comparison-row { min-height: 74px; border-top: 1px solid #edf0f5; padding: 8px 10px; }
+.snapshot-comparison-row > strong { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
+.snapshot-comparison-row > strong > small { font-size: 11px; font-weight: 700; }
+.snapshot-account-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.snapshot-account-name > span { min-width: 0; }
+.snapshot-account-name b,
+.snapshot-account-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snapshot-account-name b { font-size: 14px; }
+.snapshot-account-name small { margin-top: 4px; color: #9299aa; font-size: 11px; }
+
+@media (max-width: 760px) {
+  .snapshot-comparison-heading { display: none; }
+  .snapshot-comparison-row { grid-template-columns: minmax(0, 1fr) auto; gap: 12px; padding: 14px 4px; }
+  .snapshot-comparison-row > strong { align-items: flex-end; text-align: right; }
+  .snapshot-comparison-row > strong:nth-of-type(3) { grid-column: 2; grid-row: 2; }
+  .snapshot-comparison-row > strong:nth-of-type(2) { grid-column: 1; grid-row: 2; align-items: flex-start; text-align: left; }
+}
