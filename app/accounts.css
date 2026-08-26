@@ -22,8 +22,7 @@
 .snapshot-comparison-row .valuation-amount { display: block !important; }
 .snapshot-comparison-row > strong > small { margin-left: 4px; font-size: 11px; font-weight: 700; }
 .snapshot-total-row { background: #f5f6ff; box-shadow: inset 3px 0 #5666df; }
-.snapshot-total-row .snapshot-account-name > i { background: #5666df; color: #fff; }
-.snapshot-account-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.snapshot-account-name { display: flex; align-items: center; min-width: 0; }
 .snapshot-account-name > span { min-width: 0; }
 .snapshot-account-name b,
 .snapshot-account-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
