@@ -186,39 +186,52 @@ const normalizeAccounts = (accounts: Account[]) => accounts.map(account => ({
 }));
 
 type TrendSeries = { id: string; name: string; color: string; snapshots: Snapshot[]; currentCost?: number; subtitle?: string; iconLabel?: string };
-function TrendLegend({ series, compact = false }: { series: TrendSeries[]; compact?: boolean }) {
-  return <div className={`trend-line-legend ${compact ? "compact" : ""}`}>{series.map(item => { const last = item.snapshots.at(-1); const cost = last?.cost ?? item.currentCost ?? 0; const rate = last && cost > 0 ? (last.total / cost - 1) * 100 : null; const profit = last && cost > 0 ? last.total - cost : null; const tone = rate === null ? "" : rate >= 0 ? "positive" : "negative"; return <span key={item.id}><i style={{ background: item.color }} />{item.name}<strong className={tone}>{rate === null || profit === null ? "기준 생성 중" : <>{percent(rate)}<small>{profit >= 0 ? "+" : ""}{won.format(profit)}</small></>}</strong></span>; })}</div>;
+function TrendLegend({ series }: { series: TrendSeries[] }) {
+  return <div className="trend-line-legend" aria-label="차트 범례">{series.map(item => <span key={item.id}><i style={{ background: item.color }} />{item.name}</span>)}</div>;
 }
-function TrendChart({ series, stackSeries = series, showLegend = true }: { series: TrendSeries[]; stackSeries?: TrendSeries[]; showLegend?: boolean }) {
+function TrendMultiSelect({ label, options, selected, showTotal, onShowTotalChange, onChange }: { label: string; options: TrendSeries[]; selected: string[]; showTotal: boolean; onShowTotalChange: (value: boolean) => void; onChange: (value: string[]) => void }) {
+  const selectedNames = options.filter(option => selected.includes(option.id)).map(option => option.name);
+  const toggle = (id: string) => onChange(selected.includes(id) ? selected.filter(value => value !== id) : selected.length >= 5 ? selected : [...selected, id]);
+  return <details className="trend-multiselect"><summary><span>{label} 선택</span><b>{showTotal ? "전체" : ""}{showTotal && selectedNames.length ? " · " : ""}{selectedNames.slice(0, 2).join(", ")}{selectedNames.length > 2 ? ` +${selectedNames.length - 2}` : ""}<i>⌄</i></b></summary><div className="trend-multiselect-menu"><div><button type="button" onClick={() => onChange(options.slice(0, 5).map(option => option.id))}>모두 선택</button><button type="button" onClick={() => onChange([])}>선택 해제</button></div><label><input type="checkbox" checked={showTotal} onChange={event => onShowTotalChange(event.target.checked)} />전체</label>{options.map(option => <label key={option.id}><input type="checkbox" checked={selected.includes(option.id)} disabled={!selected.includes(option.id) && selected.length >= 5} onChange={() => toggle(option.id)} /><i style={{ background: option.color }} />{option.name}</label>)}<small>개별 항목은 최대 5개까지 비교할 수 있습니다.</small></div></details>;
+}
+
+function TrendChart({ series, mode }: { series: TrendSeries[]; mode: "amount" | "return" }) {
   const costOf = (item: TrendSeries, snapshot: Snapshot) => snapshot.cost ?? item.currentCost ?? 0;
-  const drawableSeries = series.filter(item => item.snapshots.length > 1 && item.snapshots.every(snapshot => costOf(item, snapshot) > 0)).map(item => ({ ...item, returns: item.snapshots.map(snapshot => (snapshot.total / costOf(item, snapshot) - 1) * 100), profits: item.snapshots.map(snapshot => snapshot.total - costOf(item, snapshot)) }));
+  const dates = [...new Set(series.flatMap(item => item.snapshots.map(snapshot => snapshot.date)))].sort();
+  const drawableSeries = series.map(item => ({ ...item, points: dates.flatMap(date => {
+    const snapshot = item.snapshots.find(candidate => candidate.date === date);
+    if (!snapshot) return [];
+    const cost = costOf(item, snapshot);
+    if (mode === "return" && cost <= 0) return [];
+    return [{ date, value: mode === "amount" ? snapshot.total : (snapshot.total / cost - 1) * 100 }];
+  }) })).filter(item => item.points.length > 1);
   if (!drawableSeries.length) return <div className="chart empty-chart">비교 기준 생성 중입니다. 선택한 항목의 일별 스냅샷이 2개 쌓이면 추이가 표시됩니다.</div>;
-  const allRates = drawableSeries.flatMap(item => item.returns);
-  const minObservedRate = Math.min(...allRates);
-  const maxObservedRate = Math.max(...allRates);
-  const axisRateMin = minObservedRate - 2;
-  const axisRateMax = maxObservedRate + 2;
-  const axisRateRange = Math.max(axisRateMax - axisRateMin, 0.1);
-  const referenceSnapshots = drawableSeries[0].snapshots;
-  const drawableStackSeries = stackSeries.filter(item => item.snapshots.length > 0);
-  const valueStacks = referenceSnapshots.map(snapshot => drawableStackSeries.reduce((sum, item) => sum + (item.snapshots.find(candidate => candidate.date === snapshot.date)?.total ?? 0), 0));
-  const axisValue = Math.max(...valueStacks, 1) * 1.1;
-  const rateLabel = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
-  const valueLabel = (value: number) => won.format(value);
-  const firstDate = drawableSeries[0].snapshots[0].date;
-  const lastDate = drawableSeries[0].snapshots.at(-1)!.date;
-  const barWidth = Math.min(8, 54 / valueStacks.length);
-  return <>{showLegend && <TrendLegend series={series} />}<div className="trend-chart"><div className="trend-axis trend-rate-axis" aria-label="수익률 축"><span>{rateLabel(axisRateMax)}</span><span>{rateLabel((axisRateMax + axisRateMin) / 2)}</span><span>{rateLabel(axisRateMin)}</span></div><div className="trend-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="항목별 수익률 선과 항목별 누적 평가금액 스택 막대 추이"><g className="trend-value-bars">{referenceSnapshots.map((snapshot, index) => { const x = referenceSnapshots.length === 1 ? 50 : index / (referenceSnapshots.length - 1) * 100; let cumulative = 0; return drawableStackSeries.map(item => { const value = item.snapshots.find(candidate => candidate.date === snapshot.date)?.total ?? 0; if (!value) return null; const startY = 90 - cumulative / axisValue * 80; cumulative += value; const endY = 90 - cumulative / axisValue * 80; return <rect key={`${item.id}-${snapshot.date}`} x={x - barWidth / 2} y={endY} width={barWidth} height={Math.max(0, startY - endY)} fill={item.color} />; }); })}</g>{drawableSeries.map(item => { const points = item.returns.map((rate, index) => `${item.returns.length === 1 ? 50 : index / (item.returns.length - 1) * 100},${10 + (axisRateMax - rate) / axisRateRange * 80}`).join(" "); return <polyline key={item.id} points={points} fill="none" stroke={item.color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />; })}</svg></div><div className="trend-axis trend-value-axis" aria-label="평가금액 축"><span>{valueLabel(axisValue)}</span><span>{valueLabel(axisValue / 2)}</span><span>0</span></div><div className="trend-labels"><span>{firstDate.slice(5).replace("-", ".")}</span><span>{lastDate.slice(5).replace("-", ".")}</span></div></div></>;
+  const values = drawableSeries.flatMap(item => item.points.map(point => point.value));
+  let axisMin = Math.min(...values);
+  let axisMax = Math.max(...values);
+  if (mode === "return") { axisMin = Math.min(axisMin, 0); axisMax = Math.max(axisMax, 0); }
+  const margin = Math.max(mode === "return" ? 1 : axisMax * 0.025, (axisMax - axisMin) * 0.12, 1);
+  axisMin = mode === "amount" ? Math.max(0, axisMin - margin) : axisMin - margin;
+  axisMax += margin;
+  const axisRange = Math.max(axisMax - axisMin, 1);
+  const y = (value: number) => 8 + (axisMax - value) / axisRange * 84;
+  const x = (date: string) => dates.length <= 1 ? 50 : dates.indexOf(date) / (dates.length - 1) * 100;
+  const label = (value: number) => mode === "return" ? `${value >= 0 ? "+" : ""}${value.toFixed(1)}%` : value >= 100000000 ? `${(value / 100000000).toFixed(1)}억` : value >= 10000 ? `${Math.round(value / 10000).toLocaleString()}만원` : `${Math.round(value).toLocaleString()}원`;
+  const tickDates = [...new Set([dates[0], dates[Math.floor((dates.length - 1) / 3)], dates[Math.floor((dates.length - 1) * 2 / 3)], dates.at(-1)].filter((date): date is string => Boolean(date)))];
+  return <div className={`trend-chart trend-chart-${mode}`}><div className="trend-axis trend-rate-axis" aria-label={mode === "amount" ? "평가금액 축" : "수익률 축"}><span>{label(axisMax)}</span><span>{label((axisMax + axisMin) / 2)}</span><span>{label(axisMin)}</span></div><div className="trend-plot"><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={mode === "amount" ? "선택 항목별 평가금액 추이" : "선택 항목별 수익률 추이"}>{mode === "return" && axisMin < 0 && axisMax > 0 && <line x1="0" x2="100" y1={y(0)} y2={y(0)} stroke="#cfd5e3" strokeDasharray="2 2" vectorEffect="non-scaling-stroke" />}{drawableSeries.map(item => { const points = item.points.map(point => `${x(point.date)},${y(point.value)}`).join(" "); return <g key={item.id}><polyline points={points} fill="none" stroke={item.color} strokeWidth="2.5" vectorEffect="non-scaling-stroke" /><title>{item.name}</title></g>; })}</svg></div><div className="trend-labels">{tickDates.map(date => <span key={date}>{date.slice(5).replace("-", ".")}</span>)}</div></div>;
 }
 
 function PerformancePanel({ title, period, onPeriodChange, items, aggregateSeries, selectedItems, onSelectionChange, pickerLabel, pickerColumnLabel = "계좌", valuationDailyRate }: { title: string; period: ReportPeriod; onPeriodChange: (period: ReportPeriod) => void; items: TrendSeries[]; aggregateSeries: TrendSeries; selectedItems: string[]; onSelectionChange: (items: string[]) => void; pickerLabel: string; pickerColumnLabel?: string; valuationDailyRate?: number | null }) {
-  const visibleItems = items.filter(item => selectedItems.includes(item.id));
-  const aggregateMode = visibleItems.length === 0;
-  const chartSeries = aggregateMode ? [aggregateSeries] : visibleItems;
+  const [mode, setMode] = useState<"amount" | "return">("amount");
+  const [showTotal, setShowTotal] = useState(true);
+  const accountPalette = ["#5666df", "#ec6f92", "#24a48d", "#e69b32", "#8d71e8", "#1989c8", "#a65e48", "#788445"];
+  const displayItems = pickerColumnLabel === "계좌" ? items.map((item, index) => ({ ...item, color: accountPalette[index % accountPalette.length] })) : items;
+  const visibleItems = displayItems.filter(item => selectedItems.includes(item.id));
+  const chartSeries = [...(showTotal ? [{ ...aggregateSeries, color: "#273043", name: "전체" }] : []), ...visibleItems];
   const itemPerformance = (item: TrendSeries) => { const last = item.snapshots.at(-1); const cost = item.currentCost ?? last?.cost ?? 0; const rate = last && cost > 0 ? (last.total / cost - 1) * 100 : null; const profit = last && cost > 0 ? last.total - cost : null; return { rate, profit }; };
-  const headline = aggregateMode ? itemPerformance(aggregateSeries) : null;
+  const headline = itemPerformance(aggregateSeries);
   const headlineAmount = aggregateSeries.snapshots.at(-1)?.total ?? 0;
-  return <section className="content-grid trend-content-grid"><article className="panel performance-panel"><header className="trend-panel-header"><div className="trend-heading"><div><h2>{title}</h2><p>{aggregateMode ? `전체 ${items.length}개 항목 합산` : `${pickerColumnLabel} ${visibleItems[0]?.name ?? ""} 추이`}</p></div>{headline && <div className="trend-headline-metrics"><div><span>통합 수익률</span><strong className={headline.rate !== null && headline.rate < 0 ? "negative" : "positive"}>{headline.rate === null ? "-" : percent(headline.rate)}</strong></div><div><span>통합 평가금액</span><strong className="valuation-amount">{won.format(headlineAmount)}<PriorCloseRate rate={valuationDailyRate} /></strong></div><div><span>평가손익</span><strong className={headline.profit !== null && headline.profit < 0 ? "negative" : "positive"}>{headline.profit === null ? "-" : <>{headline.profit >= 0 ? "+" : ""}{won.format(headline.profit)}</>}</strong></div></div>}</div></header><div className="trend-panel-body"><div className="trend-workspace without-selection"><div className="trend-chart-column"><div className="trend-series-list"><TrendChart series={chartSeries} stackSeries={aggregateMode ? items : visibleItems} showLegend={false} /></div><div className="trend-controls"><div className="periods" role="tablist">{reports.map(item => <button key={item} role="tab" aria-selected={period === item} className={period === item ? "selected" : ""} onClick={() => onPeriodChange(item)}>{item}</button>)}</div><label className="trend-select"><span>{pickerLabel}</span><select value={selectedItems[0] ?? ""} onChange={event => onSelectionChange(event.target.value ? [event.target.value] : [])}><option value="">전체</option>{items.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div></div></div></div></article></section>;
+  return <section className="content-grid trend-content-grid"><article className="panel performance-panel"><header className="trend-panel-header"><div className="trend-heading"><div><h2>{title}</h2><p>전체 또는 원하는 {pickerColumnLabel}을 함께 선택해 비교할 수 있습니다.</p></div><div className="trend-headline-metrics"><div><span>통합 수익률</span><strong className={headline.rate !== null && headline.rate < 0 ? "negative" : "positive"}>{headline.rate === null ? "-" : percent(headline.rate)}</strong></div><div><span>통합 평가금액</span><strong className="valuation-amount">{won.format(headlineAmount)}<PriorCloseRate rate={valuationDailyRate} /></strong></div><div><span>평가손익</span><strong className={headline.profit !== null && headline.profit < 0 ? "negative" : "positive"}>{headline.profit === null ? "-" : <>{headline.profit >= 0 ? "+" : ""}{won.format(headline.profit)}</>}</strong></div></div></div></header><div className="trend-panel-body"><div className="trend-chart-controls"><div className="trend-mode-toggle" role="tablist" aria-label="차트 지표"><button type="button" role="tab" aria-selected={mode === "amount"} className={mode === "amount" ? "selected" : ""} onClick={() => setMode("amount")}>평가금액</button><button type="button" role="tab" aria-selected={mode === "return"} className={mode === "return" ? "selected" : ""} onClick={() => setMode("return")}>수익률</button></div><TrendMultiSelect label={pickerLabel.replace(" 선택", "")} options={displayItems} selected={selectedItems} showTotal={showTotal} onShowTotalChange={setShowTotal} onChange={onSelectionChange} /><div className="periods" role="tablist">{reports.map(item => <button key={item} role="tab" aria-selected={period === item} className={period === item ? "selected" : ""} onClick={() => onPeriodChange(item)}>{item}</button>)}</div></div><div className="trend-series-list"><TrendLegend series={chartSeries} /><TrendChart series={chartSeries} mode={mode} /></div></div></article></section>;
 }
 // 사용자가 제공한 미국 주식 잔고 화면의 수량·달러 평단가입니다. 현재가는 조회 시 갱신됩니다.
 const importedUsdHoldings: Holding[] = [
@@ -294,7 +307,7 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
     <p className="holdings-note">{note}</p>
     {quoteBasis && <p className="quote-basis">{quoteBasis}</p>}
     {(isIrp || contributionLimits.length > 0) && <section className="account-limit-summary"><div className="limit-summary-head"><p className="eyebrow">ACCOUNT LIMITS</p><span>2026년 기준</span></div><div className="limit-summary-grid">{isIrp && <div className="limit-metric"><span>위험자산 비중</span><strong className={irpRiskyRate <= 70 ? "limit-ok" : "limit-alert"}>{irpRiskyRate.toFixed(1)}% <small>/ 70.0%</small></strong><small>ETF·주식 {won.format(irpRiskyAmount)}</small></div>}{contributionLimits.map(item => <div className="limit-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div><p>{["연금저축", "IRP"].includes(account.type) ? "연금저축 CMA의 올해 납입금액 600만원을 반영했습니다. IRP 납입액을 추가하면 합산 잔여 한도가 자동 갱신됩니다." : "납입 잔여 한도는 납입 내역을 등록하면 계산해 표시합니다."}</p></section>}
-    <section className="account-holding-trend"><div className="detail-head"><div><p className="eyebrow">HOLDING PERFORMANCE</p><h4>보유 종목 추이</h4></div></div><p className="holdings-note">아래 보유 종목 행을 클릭하면 그래프에 추가됩니다. 선택하지 않으면 계좌 합산 추이를 표시합니다.</p><div className="trend-series-list"><TrendChart series={visibleHoldingTrendItems} stackSeries={selectedHoldingTrendItems.length ? selectedHoldingTrendItems : holdingTrendItems.slice(1)} showLegend={false} /></div></section>
+    <section className="account-holding-trend"><div className="detail-head"><div><p className="eyebrow">HOLDING PERFORMANCE</p><h4>보유 종목 추이</h4></div></div><p className="holdings-note">아래 보유 종목 행을 클릭하면 그래프에 추가됩니다. 선택하지 않으면 계좌 합산 평가금액 추이를 표시합니다.</p><div className="trend-series-list"><TrendChart series={visibleHoldingTrendItems} mode="amount" /></div></section>
     {positions.length === 0 ? <div className="empty-holdings">등록된 {isCoin ? "코인 보유자산" : "보유 종목"}이 없습니다.</div> : groups.map(group => <div className="holding-group" key={group.assetClass}>{isIrp && <h4>{group.assetClass}</h4>}<div className="holding-table"><div><span>{isCoin ? "코인" : isIrp ? "상품" : "종목"}</span><span>보유 수량</span><span>매입금액</span><span>평가금액</span><span>평가손익</span><span>수익률</span></div>{group.positions.map(holding => {
       const multiplier = isUsd ? exchangeRate : 1;
       const cost = holding.quantity * holding.averagePrice * multiplier;
