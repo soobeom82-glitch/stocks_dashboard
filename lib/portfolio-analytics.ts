@@ -18,6 +18,7 @@ export type AnalyticsHolding = {
   fallbackPrice: number;
   accountId?: number;
   market?: string;
+  holdingStatus?: string;
 };
 
 export type PortfolioSnapshot = {
@@ -41,6 +42,16 @@ export type AggregatedHolding = {
   portfolioWeight: number;
   returnRate: number | null;
   accountIds: number[];
+  lots: HoldingLot[];
+};
+
+export type HoldingLot = {
+  accountId: number;
+  accountName: string;
+  holdingStatus: string;
+  quantity: number;
+  evaluationAmount: number;
+  costAmount: number;
 };
 
 export type DailyContribution = AggregatedHolding & {
@@ -61,8 +72,11 @@ export type TargetAllocationGap = {
 
 const holdingKey = (accountId: number, holding: AnalyticsHolding) => `${accountId}:${holding.symbol}:${holding.name}`;
 const numberOrZero = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const holdingStatusPattern = /(^|[\s·ㆍ()[\]_-])(대여|현금|담보|대용|신용|융자|대주)(?=$|[\s·ㆍ()[\]_-])/gu;
 const normalizedHoldingName = (name: string) => name.trim().toLocaleLowerCase("ko-KR").replace(/[\s··_\-()]/g, "");
-const holdingIdentity = (holding: AnalyticsHolding) => holding.symbol.trim() || normalizedHoldingName(holding.name);
+export const holdingStatusFor = (holding: AnalyticsHolding) => holding.holdingStatus?.trim() || [...holding.name.matchAll(holdingStatusPattern)][0]?.[2] || "기타";
+export const assetDisplayName = (holding: AnalyticsHolding) => holding.name.replace(holdingStatusPattern, "$1").replace(/\s{2,}/g, " ").trim();
+const holdingIdentity = (holding: AnalyticsHolding) => holding.symbol.trim() || normalizedHoldingName(assetDisplayName(holding));
 const CONCENTRATION_LIMITS = {
   equity: { high: 70, veryHigh: 85 },
   single: { caution: 10, high: 20 },
@@ -118,6 +132,7 @@ export function aggregateHoldingsByAsset({
         evaluationAmount: account.amount,
         costAmount: account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0,
         accountIds: [account.id],
+        lots: [{ accountId: account.id, accountName: account.name, holdingStatus: "기타", quantity: 0, evaluationAmount: account.amount, costAmount: account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0 }],
       });
       return;
     }
@@ -129,13 +144,14 @@ export function aggregateHoldingsByAsset({
       const nextCost = cost * scale * weight;
       records.set(id, {
         id,
-        name: holding.name,
+        name: assetDisplayName(holding),
         ticker: holding.symbol,
         assetType,
         market,
         evaluationAmount: (prior?.evaluationAmount ?? 0) + nextAmount,
         costAmount: (prior?.costAmount ?? 0) + nextCost,
         accountIds: [...new Set([...(prior?.accountIds ?? []), account.id])],
+        lots: [...(prior?.lots ?? []), { accountId: account.id, accountName: account.name, holdingStatus: holdingStatusFor(holding), quantity: holding.quantity * weight, evaluationAmount: nextAmount, costAmount: nextCost }],
       });
     }));
   });
@@ -189,14 +205,12 @@ export function calculateDailyContributions({
   sources,
   latest,
   previous,
-  assetTypeFor,
   assetWeightsFor,
 }: {
   accounts: AnalyticsAccount[];
   sources: HoldingSource[];
   latest?: PortfolioSnapshot;
   previous?: PortfolioSnapshot;
-  assetTypeFor: AssetTypeResolver;
   assetWeightsFor: AssetWeightResolver;
 }) {
   if (!latest?.holdingAmounts || !previous?.holdingAmounts) return null;
@@ -219,7 +233,7 @@ export function calculateDailyContributions({
       const item = results.get(id);
       results.set(id, {
         id,
-        name: holding.name,
+        name: assetDisplayName(holding),
         ticker: holding.symbol,
         assetType,
         market,
@@ -231,6 +245,7 @@ export function calculateDailyContributions({
         portfolioWeight: 0,
         returnRate: null,
         accountIds: [...new Set([...(item?.accountIds ?? []), account.id])],
+        lots: [],
       });
     }));
   });
