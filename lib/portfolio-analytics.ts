@@ -61,6 +61,13 @@ export type TargetAllocationGap = {
 
 const holdingKey = (accountId: number, holding: AnalyticsHolding) => `${accountId}:${holding.symbol}:${holding.name}`;
 const numberOrZero = (value: number | undefined) => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const normalizedHoldingName = (name: string) => name.trim().toLocaleLowerCase("ko-KR").replace(/[\s··_\-()]/g, "");
+const holdingIdentity = (holding: AnalyticsHolding) => holding.symbol.trim() || normalizedHoldingName(holding.name);
+const CONCENTRATION_LIMITS = {
+  equity: { high: 70, veryHigh: 85 },
+  single: { caution: 10, high: 20 },
+  topFive: { caution: 40, high: 60 },
+} as const;
 const marketFor = (account: AnalyticsAccount, holding?: AnalyticsHolding) => {
   if (holding?.market) return holding.market;
   if (account.type === "미국 주식") return "US";
@@ -116,7 +123,7 @@ export function aggregateHoldingsByAsset({
     }
     positions.forEach(({ holding, value, cost }) => assetWeightsFor(account, holding).forEach(([assetType, weight]) => {
       const market = marketFor(account, holding);
-      const id = `${assetType}:${market}:${holding.symbol}`;
+      const id = `${assetType}:${market}:${holdingIdentity(holding)}`;
       const prior = records.get(id);
       const nextAmount = value * scale * weight;
       const nextCost = cost * scale * weight;
@@ -161,15 +168,20 @@ export function calculateConcentrationMetrics(items: AggregatedHolding[]) {
 }
 
 export function concentrationTone(kind: "equity" | "single" | "topFive", value: number) {
-  const limits = kind === "equity" ? [70, 85] : kind === "single" ? [10, 20] : [40, 60];
-  return value > limits[1] ? "매우 높음" : value >= limits[0] ? "주의" : "보통";
+  if (kind === "equity") {
+    if (value > CONCENTRATION_LIMITS.equity.veryHigh) return "매우 높음";
+    return value >= CONCENTRATION_LIMITS.equity.high ? "높음" : "보통";
+  }
+  const limits = kind === "single" ? CONCENTRATION_LIMITS.single : CONCENTRATION_LIMITS.topFive;
+  return value > limits.high ? "높음" : value >= limits.caution ? "주의" : "보통";
 }
 
 export function portfolioSummary(items: AggregatedHolding[]) {
   const metrics = calculateConcentrationMetrics(items);
   const profile = metrics.equityWeight > 85 ? "공격적" : metrics.equityWeight >= 70 ? "성장형" : "균형형";
   const domestic = metrics.domesticWeight > 55 ? "국내 비중 높음" : "국내 비중 보통";
-  return `${profile} · 주식 ${metrics.equityWeight.toFixed(1)}% · ${domestic} · 단일 종목 집중 ${concentrationTone("single", metrics.topOneWeight)}`;
+  const singleSummary = metrics.topOneWeight > CONCENTRATION_LIMITS.single.high ? "높음" : metrics.topOneWeight >= CONCENTRATION_LIMITS.single.caution ? "주의" : "낮음";
+  return `${profile} · 주식 ${metrics.equityWeight.toFixed(1)}% · ${domestic} · 단일 종목 집중 ${singleSummary}`;
 }
 
 export function calculateDailyContributions({
@@ -203,7 +215,7 @@ export function calculateDailyContributions({
       const previousAmount = numberOrZero(previous.holdingAmounts?.[key]) * previousScale * weight;
       if (latestAmount === 0 && previousAmount === 0) return;
       const market = marketFor(account, holding);
-      const id = `${assetType}:${market}:${holding.symbol}`;
+      const id = `${assetType}:${market}:${holdingIdentity(holding)}`;
       const item = results.get(id);
       results.set(id, {
         id,
