@@ -91,6 +91,12 @@ const kakaoPayOverseasHoldings: Holding[] = [
   { symbol: "TSLA", name: "테슬라", quantity: 0.4061, averagePrice: 250.47, fallbackPrice: 142.27 / 0.4061, accountId: 15 },
   { symbol: "AAPL", name: "애플", quantity: 0.023, averagePrice: 154.2, fallbackPrice: 7.1 / 0.023, accountId: 15 },
 ];
+// 미래에셋증권 개인투자용국채 화면의 세전 만기금액과 매입금액입니다. 장중 시세가 아닌 만기 상환 예정금액을 평가값으로 유지합니다.
+const miraeBondAccount: Account = { id: 16, type: "채권", broker: "미래에셋증권", name: "개인투자용국채 계좌", amount: 283440, returnRate: (283440 / 200000 - 1) * 100, color: "mint", portfolioId: "kim-soobeom" };
+const miraeBondHoldings: Holding[] = [
+  { symbol: "KTB-03540-3406", name: "개인투자용국채 03540-3406", quantity: 1, averagePrice: 100000, fallbackPrice: 143670, accountId: 16, unit: "건" },
+  { symbol: "KTB-03185-3408", name: "개인투자용국채 03185-3408", quantity: 1, averagePrice: 100000, fallbackPrice: 139770, accountId: 16, unit: "건" },
+];
 const reports = ["주", "월", "분기", "반기", "1년", "최대"] as const;
 type ReportPeriod = typeof reports[number];
 const snapshotComparisonPeriods = ["일", "주", "월", "분기", "반기", "1년", "최대"] as const;
@@ -171,6 +177,7 @@ const accountProfile: Record<number, Pick<Account, "broker" | "name">> = {
   13: { name: "토스 국내 주식 계좌", broker: "토스증권" },
   14: { name: "토스 해외 주식 계좌", broker: "토스증권" },
   15: { name: "카카오페이 미국 주식 계좌", broker: "카카오페이증권" },
+  16: { name: "개인투자용국채 계좌", broker: "미래에셋증권" },
 };
 const normalizeAccounts = (accounts: Account[]) => accounts.map(account => ({
   ...account,
@@ -231,14 +238,16 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
   const isCoin = account.type === "코인";
   const isFund = account.type === "펀드";
   const isIrp = account.type === "IRP";
+  const isBond = account.type === "채권";
   const isKrwStock = ["국내 주식", "ISA", "연금저축"].includes(account.type);
   const groups = isIrp
     ? ["ETF·주식", "현금성·금융상품"].map(assetClass => ({ assetClass, positions: positions.filter(holding => holding.assetClass === assetClass) })).filter(group => group.positions.length)
     : [{ assetClass: "보유자산", positions }];
-  const title = isUsd ? "미국 주식 · 원화 환산 기준" : isCoin ? "코인 · 업비트 현재가 기준" : isFund ? "펀드 · 등록 평가금액 기준" : account.type === "국내 주식" ? "국내 주식 · 현재가 기준" : account.type === "ISA" ? "ISA · 현재가 기준" : account.type === "연금저축" ? "연금저축 · 현재가 기준" : "IRP · 투자상품 및 현금성 자산";
-  const label = isUsd ? "US HOLDINGS · KRW" : isCoin ? "CRYPTO HOLDINGS" : isFund ? "FUND HOLDINGS" : account.type === "국내 주식" ? "DOMESTIC HOLDINGS" : account.type === "ISA" ? "ISA HOLDINGS" : account.type === "연금저축" ? "PENSION HOLDINGS" : "IRP HOLDINGS";
+  const title = isUsd ? "미국 주식 · 원화 환산 기준" : isCoin ? "코인 · 업비트 현재가 기준" : isBond ? "개인투자용국채 · 세전 만기금액 기준" : isFund ? "펀드 · 등록 평가금액 기준" : account.type === "국내 주식" ? "국내 주식 · 현재가 기준" : account.type === "ISA" ? "ISA · 현재가 기준" : account.type === "연금저축" ? "연금저축 · 현재가 기준" : "IRP · 투자상품 및 현금성 자산";
+  const label = isUsd ? "US HOLDINGS · KRW" : isCoin ? "CRYPTO HOLDINGS" : isBond ? "GOVERNMENT BONDS" : isFund ? "FUND HOLDINGS" : account.type === "국내 주식" ? "DOMESTIC HOLDINGS" : account.type === "ISA" ? "ISA HOLDINGS" : account.type === "연금저축" ? "PENSION HOLDINGS" : "IRP HOLDINGS";
   const note = isUsd
     ? `미국 현지 현재가와 USD/KRW 환율(1 USD = ${won.format(exchangeRate)})을 반영해 원화 평가금액·손익을 계산합니다.`
+    : isBond ? "세전 만기금액을 평가금액으로 표시합니다. 중도 매도 시 실제 수령액은 달라질 수 있습니다."
     : isFund ? "한화자산운용 PINE에서 확인한 평가금액을 기준으로 표시합니다. 펀드 기준가 연동은 추후 추가할 수 있습니다."
     : isKrwStock ? "등록된 보유 수량과 평단가를 기준으로 현재가 손익과 수익률을 계산합니다."
     : isCoin ? "업비트 KRW 마켓 현재가를 6시간마다 갱신하며, 버튼으로 즉시 다시 조회할 수 있습니다."
@@ -274,9 +283,9 @@ function AccountDetails({ account, positions, updatedAt, exchangeRate, refresh, 
         ? [{ label: "올해 IRP 납입", value: "300만원" }, { label: "연금계좌 합산 올해 납입", value: "900만원 / 연 1,800만원" }, { label: "합산 잔여 납입 · 세액공제", value: "900만원 · 0원 / 연 900만원" }]
         : [];
 
-  if (!isUsd && !isCoin && !isFund && !isKrwStock && !isIrp) return <div className="account-expanded empty-account-detail">등록된 보유자산이 없습니다.</div>;
+  if (!isUsd && !isCoin && !isFund && !isBond && !isKrwStock && !isIrp) return <div className="account-expanded empty-account-detail">등록된 보유자산이 없습니다.</div>;
   return <div className="account-expanded">
-    <div className="detail-head"><div><p className="eyebrow">{label}</p><h3>{title}</h3></div>{!isFund && <button className="text-button" onClick={event => { event.stopPropagation(); void refresh(); }}>현재가 새로고침 {updatedAt && `· ${updatedAt}`}</button>}</div>
+    <div className="detail-head"><div><p className="eyebrow">{label}</p><h3>{title}</h3></div>{!isFund && !isBond && <button className="text-button" onClick={event => { event.stopPropagation(); void refresh(); }}>현재가 새로고침 {updatedAt && `· ${updatedAt}`}</button>}</div>
     <p className="holdings-note">{note}</p>
     {quoteBasis && <p className="quote-basis">{quoteBasis}</p>}
     {(isIrp || contributionLimits.length > 0) && <section className="account-limit-summary"><div className="limit-summary-head"><p className="eyebrow">ACCOUNT LIMITS</p><span>2026년 기준</span></div><div className="limit-summary-grid">{isIrp && <div className="limit-metric"><span>위험자산 비중</span><strong className={irpRiskyRate <= 70 ? "limit-ok" : "limit-alert"}>{irpRiskyRate.toFixed(1)}% <small>/ 70.0%</small></strong><small>ETF·주식 {won.format(irpRiskyAmount)}</small></div>}{contributionLimits.map(item => <div className="limit-metric" key={item.label}><span>{item.label}</span><strong>{item.value}</strong></div>)}</div><p>{["연금저축", "IRP"].includes(account.type) ? "연금저축 CMA의 올해 납입금액 600만원을 반영했습니다. IRP 납입액을 추가하면 합산 잔여 한도가 자동 갱신됩니다." : "납입 잔여 한도는 납입 내역을 등록하면 계산해 표시합니다."}</p></section>}
@@ -747,6 +756,8 @@ export default function Home() {
       if (!data.state.usdHoldings?.some(holding => holding.accountId === tossOverseasAccount.id)) setUsdHoldings(current => [...current, ...tossOverseasHoldings]);
       if (!data.state.accounts?.some(account => account.id === kakaoPayOverseasAccount.id)) setAccounts(current => [...current, kakaoPayOverseasAccount]);
       if (!data.state.usdHoldings?.some(holding => holding.accountId === kakaoPayOverseasAccount.id)) setUsdHoldings(current => [...current, ...kakaoPayOverseasHoldings]);
+      if (!data.state.accounts?.some(account => account.id === miraeBondAccount.id)) setAccounts(current => [...current, miraeBondAccount]);
+      if (!data.state.fundHoldings?.some(holding => holding.accountId === miraeBondAccount.id)) setFundHoldings(current => [...current, ...miraeBondHoldings]);
     }).catch(() => mounted && setNotice("서버 저장소에 연결하지 못했습니다. 잠시 후 다시 시도해 주세요.")).finally(() => mounted && setHydrated(true));
     return () => { mounted = false; };
   }, []);
@@ -765,7 +776,7 @@ export default function Home() {
   }, [portfolios, accounts, imports, snapshots, profitPeaks, targetAllocations, irpResetVersion, holdings, usdHoldings, fundHoldings, coinHoldings, pensionHoldings, isaHoldings, irpHoldings, hydrated]);
   const detailsFor = (account: Account) => {
     if (account.type === "미국 주식") return { positions: usdHoldings.filter(item => item.accountId === account.id), updatedAt: usdQuoteUpdatedAt, exchangeRate: usdKrwRate, refresh: refreshUsdPrices };
-    if (account.type === "펀드") return { positions: fundHoldings.filter(item => item.accountId === account.id), updatedAt: "", exchangeRate: 1, refresh: async () => undefined };
+    if (account.type === "펀드" || account.type === "채권") return { positions: fundHoldings.filter(item => item.accountId === account.id), updatedAt: "", exchangeRate: 1, refresh: async () => undefined };
     if (account.type === "국내 주식") return { positions: holdings.filter(item => item.accountId === account.id), updatedAt: quoteUpdatedAt, exchangeRate: 1, refresh: () => refreshKrw(holdings, setHoldings, "국내 주식", setQuoteUpdatedAt) };
     if (account.type === "코인") return { positions: coinHoldings.filter(item => item.accountId === account.id), updatedAt: coinQuoteUpdatedAt, exchangeRate: 1, refresh: refreshCoinPrices };
     if (account.type === "ISA") return { positions: isaHoldings.filter(item => item.accountId === account.id), updatedAt: isaQuoteUpdatedAt, exchangeRate: 1, refresh: () => refreshKrw(isaHoldings, setIsaHoldings, "ISA", setIsaQuoteUpdatedAt) };
