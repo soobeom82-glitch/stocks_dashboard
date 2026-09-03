@@ -1,5 +1,7 @@
+import { PORTFOLIO_ASSET_TYPES, aggregateHoldingsByAsset, calculateConcentrationMetrics, calculateDailyContributions, calculatePortfolioWeights, type AnalyticsAccount, type AnalyticsHolding, type PortfolioAssetType } from "../lib/portfolio-analytics";
+
 type Holding = { symbol: string; name?: string; quantity: number; averagePrice: number; fallbackPrice: number; previousClose?: number; previousCloseDate?: string; quoteDate?: string; market?: string; accountId?: number; assetClass?: string; marketPrice?: number };
-type Account = { id: number; type: string; amount: number; returnRate: number; portfolioId?: string };
+type Account = { id: number; type: string; name?: string; amount: number; returnRate: number; portfolioId?: string };
 type ProfitPeak = { profit: number; date: string };
 type Snapshot = { date: string; total: number; cost?: number; accountAmounts?: Record<string, number>; accountCosts?: Record<string, number>; assetAmounts?: Record<string, number>; assetCosts?: Record<string, number>; holdingAmounts?: Record<string, number>; holdingCosts?: Record<string, number> };
 type PortfolioState = { portfolios?: Array<{ id: string; name: string }>; accounts: Account[]; holdings?: Holding[]; usdHoldings?: Holding[]; fundHoldings?: Holding[]; coinHoldings?: Holding[]; pensionHoldings?: Holding[]; isaHoldings?: Holding[]; irpHoldings?: Holding[]; snapshots?: Snapshot[]; profitPeaks?: Record<string, ProfitPeak>; telegramReportDate?: string };
@@ -11,15 +13,6 @@ const signed = (value: number) => `${value >= 0 ? "+" : ""}${number.format(value
 const percent = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 const assetTypes = ["국내 주식", "해외 주식", "채권·현금성", "대체자산", "펀드", "가상자산"];
 type AssetAmounts = Record<string, number>;
-type DailyMove = { name: string; symbol: string; rate: number; assetType: string };
-
-const displayDate = (date?: string) => date?.replaceAll("-", ".") ?? "";
-const displayDateWithWeekday = (date?: string) => {
-  if (!date) return "";
-  const weekday = new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", weekday: "short" })
-    .format(new Date(`${date}T12:00:00+09:00`));
-  return `${displayDate(date)} (${weekday})`;
-};
 const previousWeekday = (date: string) => {
   const prior = new Date(`${date}T12:00:00+09:00`);
   do prior.setDate(prior.getDate() - 1); while (prior.getDay() === 0 || prior.getDay() === 6);
@@ -42,69 +35,77 @@ function portfolioNames(state: PortfolioState) {
   return names;
 }
 
-function telegramReports(
-  state: PortfolioState,
-  accounts: Account[],
-  date: string,
-  allocations: Map<string, AssetAmounts>,
-  previousAllocations: Map<string, AssetAmounts>,
-  movers: Map<string, { gainers: DailyMove[]; losers: DailyMove[] }>,
-  previousSnapshot?: Snapshot,
-  portfolioId?: string,
-) {
+function contributionTelegramReports(state: PortfolioState, accounts: Account[], latest: Snapshot, previous: Snapshot, sources: Array<{ holdings: Holding[]; exchangeRate?: number }>, portfolioId?: string) {
   const names = portfolioNames(state);
-  const groups = new Map<string, { amount: number; cost: number }>();
-  accounts.forEach(account => {
-    const id = account.portfolioId ?? "kim-soobeom";
-    const group = groups.get(id) ?? { amount: 0, cost: 0 };
-    group.amount += account.amount;
-    group.cost += account.returnRate > -100 ? account.amount / (1 + account.returnRate / 100) : 0;
-    groups.set(id, group);
-  });
-  return [...groups.entries()].filter(([id]) => !portfolioId || id === portfolioId).map(([id, group]) => {
-    const allocation = allocations.get(id) ?? emptyAssetAmounts();
-    const previousAllocation = previousAllocations.get(id);
-    const allocationTotal = Object.values(allocation).reduce((sum, value) => sum + value, 0);
-    const previousTotal = Object.values(previousAllocation ?? {}).reduce((sum, value) => sum + value, 0);
-    const allocationLines = Object.entries(allocation)
-      .filter(([, amount]) => amount > 0)
-      .sort(([, left], [, right]) => right - left)
-      .map(([type, amount]) => {
-        const weight = amount / allocationTotal * 100;
-        const previousWeight = previousTotal && previousAllocation ? (previousAllocation[type] ?? 0) / previousTotal * 100 : null;
-        return `• ${type} ${weight.toFixed(1)}%${previousWeight === null ? "" : ` (${(weight - previousWeight >= 0 ? "+" : "") + (weight - previousWeight).toFixed(1)}%p)`}`;
-      });
-    const movement = movers.get(id) ?? { gainers: [], losers: [] };
-    const previousAmount = previousSnapshot ? accounts.filter(account => (account.portfolioId ?? "kim-soobeom") === id).reduce((sum, account) => sum + (previousSnapshot.accountAmounts?.[String(account.id)] ?? 0), 0) : 0;
-    const previousCost = previousSnapshot ? accounts.filter(account => (account.portfolioId ?? "kim-soobeom") === id).reduce((sum, account) => sum + (previousSnapshot.accountCosts?.[String(account.id)] ?? 0), 0) : 0;
-    const hasPreviousPerformance = previousAmount > 0 && previousCost > 0;
-    const currentRate = group.cost > 0 ? (group.amount / group.cost - 1) * 100 : null;
-    const previousRate = hasPreviousPerformance ? (previousAmount / previousCost - 1) * 100 : null;
-    const currentProfit = group.amount - group.cost;
-    const previousProfit = previousAmount - previousCost;
-    const comparisonBasis = previousSnapshot
-      ? `${displayDateWithWeekday(previousSnapshot.date)} 장 마감 → ${displayDateWithWeekday(date)} 장 마감 (KST)`
-      : `${displayDateWithWeekday(date)} 장 마감 (비교 기준 생성 중)`;
-    const moveLines = (items: DailyMove[]) => items.length
-      ? items.map((item, index) => `${index + 1}. [${item.assetType}] ${item.name} ${percent(item.rate)}`)
-      : ["- 해당 없음"];
-    return [
+  const portfolioIds = [...new Set(accounts.map(account => account.portfolioId ?? "kim-soobeom"))].filter(id => !portfolioId || id === portfolioId);
+  return portfolioIds.flatMap(id => {
+    const portfolioAccounts = accounts.filter(account => (account.portfolioId ?? "kim-soobeom") === id);
+    const analyticsAccounts: AnalyticsAccount[] = portfolioAccounts.map(account => ({ ...account, name: account.name ?? account.type }));
+    const contribution = calculateDailyContributions({
+      accounts: analyticsAccounts,
+      sources: sources.map(source => ({ ...source, holdings: source.holdings as AnalyticsHolding[] })),
+      latest,
+      previous,
+      assetWeightsFor: (account, holding) => assetWeightsFor(account.type, holding as Holding) as Array<[PortfolioAssetType, number]>,
+    });
+    if (!contribution || contribution.currentTotal <= 0 || contribution.previousTotal <= 0) {
+      console.warn(JSON.stringify({ event: "telegram_daily_report_skipped", portfolioId: id, evaluationDate: latest.date, reason: "missing-valid-snapshot" }));
+      return [];
+    }
+    const currentItems = aggregateHoldingsByAsset({
+      accounts: analyticsAccounts,
+      sources: sources.map(source => ({ ...source, holdings: source.holdings as AnalyticsHolding[] })),
+      assetTypeFor: (account, holding) => assetTypeFor(account.type, holding as Holding) as PortfolioAssetType,
+      assetWeightsFor: (account, holding) => assetWeightsFor(account.type, holding as Holding) as Array<[PortfolioAssetType, number]>,
+    });
+    const { weights } = calculatePortfolioWeights(currentItems);
+    const concentration = calculateConcentrationMetrics(currentItems);
+    const valid = contribution.items.filter(item => item.valid && item.name && Number.isFinite(item.amountChange) && item.amountChange !== 0);
+    const losses = valid.filter(item => item.amountChange < 0).sort((a, b) => a.amountChange - b.amountChange).slice(0, 5);
+    const gains = valid.filter(item => item.amountChange > 0).sort((a, b) => b.amountChange - a.amountChange).slice(0, 5);
+    // 등락률 순위는 실질 포트폴리오 영향 순위가 아니므로 참고 정보로만 제공합니다.
+    const rateItems = valid.filter(item => item.dailyRate !== null && Number.isFinite(item.dailyRate) && item.previousAmount > 0);
+    const gainers = rateItems.filter(item => item.dailyRate! > 0).sort((a, b) => b.dailyRate! - a.dailyRate!).slice(0, 3);
+    const losers = rateItems.filter(item => item.dailyRate! < 0).sort((a, b) => a.dailyRate! - b.dailyRate!).slice(0, 3);
+    const pointThreshold = Number(process.env.TELEGRAM_CONTRIBUTION_PERCENTAGE_POINT_THRESHOLD ?? "0.01");
+    const contributionLines = (items: typeof valid) => items.length ? items.map((item, index) => `${index + 1}. ${item.name}\n   ${signed(item.amountChange)}원${item.contributionPct !== null && Number.isFinite(item.contributionPct) && Math.abs(item.contributionPct) >= pointThreshold ? ` · ${item.contributionPct >= 0 ? "+" : ""}${item.contributionPct.toFixed(2)}%p` : ""}`) : ["- 해당 없음"];
+    const rateLines = (items: typeof rateItems) => items.length ? items.map((item, index) => `${index + 1}. [${item.assetType}] ${item.name} ${percent(item.dailyRate!)}`) : ["- 해당 없음"];
+    const lossNames = losses.slice(0, 3).map(item => item.name).join("·");
+    const gainNames = gains.slice(0, 2).map(item => item.name).join("·");
+    const summary = valid.length ? `${lossNames || "손실 기여 종목"}${lossNames ? "이 하락을 주도했고, " : ""}${gainNames || "수익 기여 종목"}${gainNames ? "이 일부 상쇄했습니다." : " 유효한 수익 기여가 없습니다."}` : "유효한 종목별 기여도 데이터가 부족합니다.";
+    const allocation = PORTFOLIO_ASSET_TYPES.filter(type => weights[type] > 0).map(type => `${type} ${weights[type].toFixed(1)}%`).join(" · ") || "계산 불가";
+    const basis = contribution.calculationBasis === "price_change" && contribution.reconciled ? "가격 변동 손익" : "전일 평가금액 증감 기준";
+    if (!contribution.reconciled || contribution.qualityWarnings.length) console.warn(JSON.stringify({ event: "telegram_daily_report_quality", portfolioId: id, evaluationDate: latest.date, basis, reconciliationDifference: contribution.reconciliationDifference, reconciliationTolerance: contribution.reconciliationTolerance, warnings: contribution.qualityWarnings }));
+    return [[
       `📊 ${names.get(id) ?? id} 포트폴리오 일일 스냅샷`,
-      `평가 기준  ${comparisonBasis}`,
+      `${previous.date} → ${latest.date} (KST)`,
       "",
-      `평가금액  ${number.format(group.amount)}원${hasPreviousPerformance ? `  (${signed(group.amount - previousAmount)}원, ${percent((group.amount / previousAmount - 1) * 100)})` : ""}`,
-      `수익률  ${currentRate === null ? "-" : percent(currentRate)}${previousRate === null || currentRate === null ? "" : `  (${currentRate - previousRate >= 0 ? "+" : ""}${(currentRate - previousRate).toFixed(2)}%p)`}`,
-      `평가손익  ${signed(currentProfit)}원${hasPreviousPerformance ? `  (${signed(currentProfit - previousProfit)}원)` : ""}`,
+      "💰 전체 자산",
+      `${number.format(contribution.currentTotal)}원`,
+      `전일 대비 ${signed(contribution.changeAmount)}원${contribution.changeRate === null ? "" : ` (${percent(contribution.changeRate)})`}`,
+      `기준: ${basis}`,
       "",
-      "📈 상승 Top 5",
-      ...moveLines(movement.gainers),
+      "📝 오늘의 요약",
+      summary,
       "",
-      "📉 하락 Top 5",
-      ...moveLines(movement.losers),
+      "🔻 오늘 손실 기여 Top 5",
+      ...contributionLines(losses),
       "",
-      `🧩 자산 유형별 비중 (${previousSnapshot ? `${displayDate(previousSnapshot.date)} → ${displayDate(date)}` : `${displayDate(date)} 기준`})`,
-      ...(allocationLines.length ? allocationLines : ["- 보유 자산 없음"]),
-    ].join("\n");
+      "🚀 오늘 수익 기여 Top 5",
+      ...contributionLines(gains),
+      "",
+      "📈 종목 등락률 Top 3 (참고)",
+      ...rateLines(gainers),
+      "",
+      "📉 종목 등락률 Bottom 3 (참고)",
+      ...rateLines(losers),
+      "",
+      "🧩 자산배분",
+      allocation,
+      "",
+      "🎯 집중도",
+      `주식 비중 ${concentration.equityWeight.toFixed(1)}% · 최대 종목 ${concentration.topOneName} ${concentration.topOneWeight.toFixed(1)}% · Top 5 ${concentration.topFiveWeight.toFixed(1)}%`,
+    ].join("\n")];
   });
 }
 
@@ -249,91 +250,6 @@ function computeAssetAmounts(accounts: Account[], sources: Array<{ holdings: Hol
   return amounts;
 }
 
-function positionsForAccounts(sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
-  const positionsByAccount = new Map<number, Array<{ holding: Holding; value: number }>>();
-  sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
-    if (!holding.accountId) return;
-    const positions = positionsByAccount.get(holding.accountId) ?? [];
-    positions.push({ holding, value: holding.quantity * holding.fallbackPrice * exchangeRate });
-    positionsByAccount.set(holding.accountId, positions);
-  }));
-  return positionsByAccount;
-}
-
-function portfolioAssetAmounts(accounts: Account[], sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
-  const output = new Map<string, AssetAmounts>();
-  const positionsByAccount = positionsForAccounts(sources);
-  accounts.forEach(account => {
-    const portfolioId = account.portfolioId ?? "kim-soobeom";
-    const amounts = output.get(portfolioId) ?? emptyAssetAmounts();
-    const positions = positionsByAccount.get(account.id) ?? [];
-    const total = positions.reduce((sum, position) => sum + position.value, 0);
-    if (!total) amounts[assetTypeFor(account.type)] += account.amount;
-    else positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => {
-      amounts[type] += account.amount * position.value / total * weight;
-    }));
-    output.set(portfolioId, amounts);
-  });
-  return output;
-}
-
-function previousPortfolioAssetAmounts(
-  previous: Snapshot | undefined,
-  accounts: Account[],
-  sources: Array<{ holdings: Holding[]; exchangeRate?: number }>,
-) {
-  const output = new Map<string, AssetAmounts>();
-  if (!previous?.accountAmounts) return output;
-  const positionsByAccount = new Map<number, Array<{ holding: Holding; snapshotValue: number }>>();
-  sources.forEach(({ holdings }) => holdings.forEach(holding => {
-    if (!holding.accountId) return;
-    const snapshotValue = previous.holdingAmounts?.[holdingSnapshotKey(holding.accountId, holding)];
-    if (!snapshotValue) return;
-    const positions = positionsByAccount.get(holding.accountId) ?? [];
-    positions.push({ holding, snapshotValue });
-    positionsByAccount.set(holding.accountId, positions);
-  }));
-  accounts.forEach(account => {
-    const accountAmount = previous.accountAmounts?.[String(account.id)];
-    if (typeof accountAmount !== "number") return;
-    const portfolioId = account.portfolioId ?? "kim-soobeom";
-    const amounts = output.get(portfolioId) ?? emptyAssetAmounts();
-    const positions = positionsByAccount.get(account.id) ?? [];
-    const total = positions.reduce((sum, position) => sum + position.snapshotValue, 0);
-    if (!total) amounts[assetTypeFor(account.type)] += accountAmount;
-    else positions.forEach(position => assetWeightsFor(account.type, position.holding).forEach(([type, weight]) => {
-      amounts[type] += accountAmount * position.snapshotValue / total * weight;
-    }));
-    output.set(portfolioId, amounts);
-  });
-  return output;
-}
-
-function portfolioDailyMovers(accounts: Account[], sources: Array<{ holdings: Holding[] }>) {
-  const accountsById = new Map(accounts.map(account => [account.id, account]));
-  const candidates = new Map<string, DailyMove>();
-  sources.forEach(({ holdings }) => holdings.forEach(holding => {
-    if (!holding.accountId || !holding.previousClose || holding.previousClose <= 0 || holding.fallbackPrice <= 0) return;
-    const account = accountsById.get(holding.accountId);
-    if (!account || account.type === "펀드" || holding.symbol === "CASH-KRW") return;
-    const id = account.portfolioId ?? "kim-soobeom";
-    const rate = (holding.fallbackPrice / holding.previousClose - 1) * 100;
-    const key = `${id}:${holding.symbol}`;
-    candidates.set(key, { name: holding.name ?? holding.symbol, symbol: holding.symbol, rate, assetType: assetTypeFor(account.type, holding) });
-  }));
-  const grouped = new Map<string, DailyMove[]>();
-  candidates.forEach((move, key) => {
-    const id = key.slice(0, key.indexOf(":"));
-    const items = grouped.get(id) ?? [];
-    items.push(move);
-    grouped.set(id, items);
-  });
-  return new Map([...grouped.entries()].map(([id, items]) => [id, {
-    gainers: items.filter(item => item.rate > 0).sort((left, right) => right.rate - left.rate).slice(0, 5),
-    losers: items.filter(item => item.rate < 0).sort((left, right) => left.rate - right.rate).slice(0, 5),
-  }]));
-}
-
 function computeHoldingAmounts(sources: Array<{ holdings: Holding[]; exchangeRate?: number }>) {
   const amounts: Record<string, number> = {};
   sources.forEach(({ holdings, exchangeRate = 1 }) => holdings.forEach(holding => {
@@ -427,29 +343,42 @@ export async function saveDailyPortfolioSnapshot(options: { forceTelegram?: bool
   const assetCosts = computeAssetCosts(accounts, holdingSources);
   const holdingCosts = computeHoldingCosts(holdingSources);
   const snapshots = [...(state.snapshots ?? []).filter(snapshot => snapshot.date !== date), { date, total, cost, accountAmounts, accountCosts, assetAmounts, assetCosts, holdingAmounts, holdingCosts }].sort((a, b) => a.date.localeCompare(b.date));
-  // 오전 리포트는 장 시작 전이므로 현재 날짜가 아닌, 가장 최근 국내 주식 마감일을 기준으로 비교합니다.
-  // 예: 월요일 발송은 목요일 마감 → 금요일 마감, 화요일 발송은 금요일 마감 → 월요일 마감입니다.
-  const latestMarketDate = previousWeekday(date);
-  const comparisonStartDate = previousWeekday(latestMarketDate);
-  const previousSnapshot = [...(state.snapshots ?? [])].filter(snapshot => snapshot.date <= comparisonStartDate).sort((a, b) => a.date.localeCompare(b.date)).at(-1);
-  const currentPortfolioAllocations = portfolioAssetAmounts(accounts, holdingSources);
-  const previousPortfolioAllocations = previousPortfolioAssetAmounts(previousSnapshot, accounts, holdingSources);
-  const dailyMovers = portfolioDailyMovers(accounts, holdingSources);
+  const latestSnapshot = snapshots.at(-1);
+  const previousSnapshot = snapshots.filter(snapshot => snapshot.date < date && Object.keys(snapshot.accountAmounts ?? {}).length > 0).at(-1);
   const profitPeaks = updateProfitPeaks(state, accounts, [{ type: "국내 주식", holdings: domestic.holdings }, { type: "ISA", holdings: isa.holdings }, { type: "연금저축", holdings: pension.holdings }, { type: "IRP", holdings: irp }], date);
   const nextState = { ...state, accounts, holdings: domestic.holdings, isaHoldings: isa.holdings, pensionHoldings: pension.holdings, usdHoldings: usd.holdings, coinHoldings: coins, irpHoldings: irp, snapshots, profitPeaks };
   const payload = JSON.stringify(nextState);
   await saveDashboardState(payload);
-  if (!options.forceTelegram && state.telegramReportDate === date) return { telegramReport: "already-sent" as const };
+  if (!latestSnapshot || !previousSnapshot || latestSnapshot.date === previousSnapshot.date) {
+    console.warn(JSON.stringify({ event: "telegram_daily_report_skipped", evaluationDate: date, reason: "missing-distinct-evaluation-snapshot" }));
+    return { telegramReport: "missing-comparison-snapshot" as const };
+  }
+  const idempotencyKey = `telegram-daily-portfolio:${latestSnapshot.date}`;
+  if (!options.forceTelegram && state.telegramReportDate === latestSnapshot.date) return { telegramReport: "already-sent" as const };
+  if (!(await claimTelegramReportDelivery(idempotencyKey))) return { telegramReport: "already-sent" as const };
   try {
-    const reports = telegramReports(state, accounts, latestMarketDate, currentPortfolioAllocations, previousPortfolioAllocations, dailyMovers, previousSnapshot, options.portfolioId);
-    if (!reports.length) return { telegramReport: "portfolio-not-found" as const };
+    const reports = contributionTelegramReports(state, accounts, latestSnapshot, previousSnapshot, holdingSources, options.portfolioId);
+    if (!reports.length) {
+      await releaseTelegramReportDelivery(idempotencyKey);
+      return { telegramReport: "portfolio-not-found" as const };
+    }
+    if (reports.some(report => !report.trim() || /(?:NaN|Infinity|undefined|null)/.test(report))) {
+      console.error(JSON.stringify({ event: "telegram_daily_report_invalid", evaluationDate: latestSnapshot.date, reason: "unsafe-message-content" }));
+      await releaseTelegramReportDelivery(idempotencyKey);
+      return { telegramReport: "invalid-message" as const };
+    }
     const sent = await sendTelegramReports(reports);
-    if (!sent) return { telegramReport: "failed" as const };
-    await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: date }));
+    if (!sent) {
+      await releaseTelegramReportDelivery(idempotencyKey);
+      return { telegramReport: "failed" as const };
+    }
+    await saveDashboardState(JSON.stringify({ ...nextState, telegramReportDate: latestSnapshot.date }));
+    await completeTelegramReportDelivery(idempotencyKey);
     return { telegramReport: "sent" as const };
   } catch (error) {
     console.error("Telegram daily report failed", error);
+    await releaseTelegramReportDelivery(idempotencyKey);
     return { telegramReport: "failed" as const };
   }
 }
-import { loadDashboardState, saveDashboardState } from "./index";
+import { claimTelegramReportDelivery, completeTelegramReportDelivery, loadDashboardState, releaseTelegramReportDelivery, saveDashboardState } from "./index";

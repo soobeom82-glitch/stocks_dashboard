@@ -58,6 +58,24 @@ export type DailyContribution = AggregatedHolding & {
   previousAmount: number;
   amountChange: number;
   contributionPct: number | null;
+  dailyRate: number | null;
+  valid: boolean;
+};
+
+export type DailyContributionResult = {
+  items: DailyContribution[];
+  currentTotal: number;
+  previousTotal: number;
+  changeAmount: number;
+  changeRate: number | null;
+  priceChangeProfit: number | null;
+  contributionTotal: number;
+  cashFlowAdjustment: number | null;
+  calculationBasis: "price_change" | "evaluation_delta";
+  reconciliationDifference: number;
+  reconciliationTolerance: number;
+  reconciled: boolean;
+  qualityWarnings: string[];
 };
 
 export type TargetAllocationGap = {
@@ -212,21 +230,42 @@ export function calculateDailyContributions({
   latest?: PortfolioSnapshot;
   previous?: PortfolioSnapshot;
   assetWeightsFor: AssetWeightResolver;
-}) {
-  if (!latest?.holdingAmounts || !previous?.holdingAmounts) return null;
+}): DailyContributionResult | null {
+  if (!latest?.holdingAmounts || !previous?.holdingAmounts || !latest.accountAmounts || !previous.accountAmounts) return null;
+  const latestHoldingAmounts = latest.holdingAmounts;
+  const previousHoldingAmounts = previous.holdingAmounts;
+  const latestAccountAmounts = latest.accountAmounts;
+  const previousAccountAmounts = previous.accountAmounts;
   const byAccount = positionsByAccount(accounts, sources);
   const results = new Map<string, DailyContribution>();
-  const previousPortfolioAmount = accounts.reduce((sum, account) => sum + numberOrZero(previous.accountAmounts?.[String(account.id)]), 0);
+  const previousPortfolioAmount = accounts.reduce((sum, account) => sum + numberOrZero(previousAccountAmounts[String(account.id)]), 0);
+  const currentPortfolioAmount = accounts.reduce((sum, account) => sum + numberOrZero(latestAccountAmounts[String(account.id)]), 0);
+  const qualityWarnings: string[] = [];
   accounts.forEach(account => {
     const positions = byAccount.get(account.id) ?? [];
-    const latestRawTotal = positions.reduce((sum, position) => sum + numberOrZero(latest.holdingAmounts?.[holdingKey(account.id, position.holding)]), 0);
-    const previousRawTotal = positions.reduce((sum, position) => sum + numberOrZero(previous.holdingAmounts?.[holdingKey(account.id, position.holding)]), 0);
-    const latestScale = latestRawTotal > 0 ? numberOrZero(latest.accountAmounts?.[String(account.id)]) / latestRawTotal : 1;
-    const previousScale = previousRawTotal > 0 ? numberOrZero(previous.accountAmounts?.[String(account.id)]) / previousRawTotal : 1;
+    const currentAccountAmount = numberOrZero(latestAccountAmounts[String(account.id)]);
+    const previousAccountAmount = numberOrZero(previousAccountAmounts[String(account.id)]);
+    if (!positions.length) {
+      if (currentAccountAmount || previousAccountAmount) {
+        const id = `account:${account.id}`;
+        results.set(id, {
+          id, name: account.name, assetType: assetTypeForFallback(account), market: marketFor(account), evaluationAmount: currentAccountAmount,
+          costAmount: 0, previousAmount: previousAccountAmount, amountChange: 0, contributionPct: null, dailyRate: null, valid: false,
+          portfolioWeight: currentPortfolioAmount > 0 ? currentAccountAmount / currentPortfolioAmount * 100 : 0, returnRate: null, accountIds: [account.id], lots: [],
+        });
+        qualityWarnings.push(`${account.name}: 종목별 스냅샷이 없어 계좌 증감으로 보정했습니다.`);
+      }
+      return;
+    }
+    const latestRawTotal = positions.reduce((sum, position) => sum + numberOrZero(latestHoldingAmounts[holdingKey(account.id, position.holding)]), 0);
+    const previousRawTotal = positions.reduce((sum, position) => sum + numberOrZero(previousHoldingAmounts[holdingKey(account.id, position.holding)]), 0);
+    const latestScale = latestRawTotal > 0 ? currentAccountAmount / latestRawTotal : 1;
+    const previousScale = previousRawTotal > 0 ? previousAccountAmount / previousRawTotal : 1;
+    if (latestRawTotal <= 0 || previousRawTotal <= 0) qualityWarnings.push(`${account.name}: 직전 또는 현재 종목별 스냅샷이 불완전합니다.`);
     positions.forEach(({ holding, cost }) => assetWeightsFor(account, holding).forEach(([assetType, weight]) => {
       const key = holdingKey(account.id, holding);
-      const latestAmount = numberOrZero(latest.holdingAmounts?.[key]) * latestScale * weight;
-      const previousAmount = numberOrZero(previous.holdingAmounts?.[key]) * previousScale * weight;
+      const latestAmount = numberOrZero(latestHoldingAmounts[key]) * latestScale * weight;
+      const previousAmount = numberOrZero(previousHoldingAmounts[key]) * previousScale * weight;
       if (latestAmount === 0 && previousAmount === 0) return;
       const market = marketFor(account, holding);
       const id = `${assetType}:${market}:${holdingIdentity(holding)}`;
@@ -242,6 +281,8 @@ export function calculateDailyContributions({
         previousAmount: (item?.previousAmount ?? 0) + previousAmount,
         amountChange: 0,
         contributionPct: null,
+        dailyRate: null,
+        valid: true,
         portfolioWeight: 0,
         returnRate: null,
         accountIds: [...new Set([...(item?.accountIds ?? []), account.id])],
@@ -250,16 +291,47 @@ export function calculateDailyContributions({
     }));
   });
   const total = [...results.values()].reduce((sum, item) => sum + item.evaluationAmount, 0);
-  return [...results.values()].map(item => {
+  const items = [...results.values()].map(item => {
     const amountChange = item.evaluationAmount - item.previousAmount;
     return {
       ...item,
       amountChange,
       contributionPct: previousPortfolioAmount > 0 ? amountChange / previousPortfolioAmount * 100 : null,
+      dailyRate: item.previousAmount > 0 ? amountChange / item.previousAmount * 100 : null,
       portfolioWeight: total > 0 ? item.evaluationAmount / total * 100 : 0,
       returnRate: item.costAmount > 0 ? (item.evaluationAmount / item.costAmount - 1) * 100 : null,
     };
-  }).sort((left, right) => right.amountChange - left.amountChange);
+  }).filter(item => Number.isFinite(item.evaluationAmount) && Number.isFinite(item.previousAmount) && Number.isFinite(item.amountChange)).sort((left, right) => right.amountChange - left.amountChange);
+  const changeAmount = currentPortfolioAmount - previousPortfolioAmount;
+  const contributionTotal = items.reduce((sum, item) => sum + item.amountChange, 0);
+  const reconciliationDifference = contributionTotal - changeAmount;
+  const reconciliationTolerance = Math.max(1000, Math.abs(changeAmount) * 0.001);
+  const reconciled = Math.abs(reconciliationDifference) <= reconciliationTolerance;
+  if (!reconciled) qualityWarnings.push("종목 기여금액 합계와 포트폴리오 증감의 정합성이 허용 범위를 벗어났습니다.");
+  // 현재 저장소에는 신뢰 가능한 거래·입출금·대여 변동 이력이 없으므로 가격 변동 손익으로 단정하지 않습니다.
+  return {
+    items,
+    currentTotal: currentPortfolioAmount,
+    previousTotal: previousPortfolioAmount,
+    changeAmount,
+    changeRate: previousPortfolioAmount > 0 ? changeAmount / previousPortfolioAmount * 100 : null,
+    priceChangeProfit: null,
+    contributionTotal,
+    cashFlowAdjustment: null,
+    calculationBasis: "evaluation_delta",
+    reconciliationDifference,
+    reconciliationTolerance,
+    reconciled,
+    qualityWarnings,
+  };
+}
+
+function assetTypeForFallback(account: AnalyticsAccount): PortfolioAssetType {
+  if (account.type === "코인") return "가상자산";
+  if (account.type === "펀드") return "펀드";
+  if (["채권", "IRP"].includes(account.type)) return "채권·현금성";
+  if (account.type === "미국 주식") return "해외 주식";
+  return "국내 주식";
 }
 
 export function calculateTargetAllocationGap({

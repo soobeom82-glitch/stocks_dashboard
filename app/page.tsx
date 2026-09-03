@@ -542,13 +542,14 @@ export default function Home() {
     .filter(snapshot => Object.keys(snapshot.accountAmounts ?? {}).length > 0)
     .sort((left, right) => left.date.localeCompare(right.date))
     .slice(-2), [snapshots]);
-  const dailyContributions = useMemo(() => calculateDailyContributions({
+  const dailyContributionResult = useMemo(() => calculateDailyContributions({
     accounts: portfolioAccounts,
     sources: analyticsSources,
     latest: latestSnapshotPair.at(-1),
     previous: latestSnapshotPair.at(-2),
     assetWeightsFor: analyticsAssetWeightsFor,
   }), [portfolioAccounts, analyticsSources, latestSnapshotPair]);
+  const dailyContributions = dailyContributionResult?.items ?? null;
   const todaySummary = useMemo(() => {
     if (!dailyContributions || dailyValuations.totalRate === null) return "전일 스냅샷이 쌓이면 오늘의 자산 변화를 요약해 드립니다.";
     const rising = dailyContributions.find(item => item.amountChange > 0);
